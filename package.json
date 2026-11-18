@@ -1,0 +1,28 @@
+{
+  "name": "worknest",
+  "engines": { "node": ">=22" },
+  "version": "1.0.0",
+  "private": true,
+  "description": "HR and Leave Management System (React, Express, MongoDB)",
+  "workspaces": [
+    "backend",
+    "frontend"
+  ],
+  "scripts": {
+    "db": "npm run db --workspace backend",
+    "seed": "npm run seed --workspace backend",
+    "dev:backend": "npm run dev --workspace backend",
+    "dev:frontend": "npm run dev --workspace frontend",
+    "build": "npm run build --workspace backend && npm run build --workspace frontend",
+    "test": "npm test --workspace backend && npm test --workspace frontend",
+    "typecheck": "npm run typecheck --workspace backend && npm run typecheck --workspace frontend"
+  },
+  "config": {
+    "mongodbMemoryServer": {
+      "version": "7.0.14"
+    }
+  },
+  "overrides": {
+    "uuid": "^11.1.1"
+  }
+}
