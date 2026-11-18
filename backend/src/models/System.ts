@@ -15,6 +15,8 @@ export interface INotification {
   /** Transactional outbox: rows commit with the change that caused them, then the job sends. */
   emailStatus: 'NONE' | 'PENDING' | 'SENT' | 'FAILED';
   emailAttempts: number;
+  /** Set while one sender is delivering it, so two senders running at once never send it twice. */
+  emailClaimedUntil: Date | null;
   createdAt: Date;
 }
 
@@ -30,6 +32,7 @@ const notificationSchema = new Schema<INotification>(
     action: { type: new Schema({ kind: { type: String, enum: EMAIL_ACTION_KINDS }, id: Schema.Types.ObjectId }, { _id: false }), default: null },
     emailStatus: { type: String, enum: ['NONE', 'PENDING', 'SENT', 'FAILED'], default: 'NONE' },
     emailAttempts: { type: Number, default: 0 },
+    emailClaimedUntil: { type: Date, default: null },
   },
   { timestamps: { createdAt: true, updatedAt: false }, collection: 'notifications' },
 );

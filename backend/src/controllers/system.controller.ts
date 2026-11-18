@@ -19,7 +19,7 @@ export const listNotifications: RequestHandler = async (req, res) => {
   if (q.unread === 'true') filter.readAt = null;
   const { skip, limit, sort } = pageOptions(q, ['createdAt'], 'createdAt');
   const [items, total, unread] = await Promise.all([
-    Notification.find(filter).sort(sort).skip(skip).limit(limit).select('-emailStatus -emailAttempts -dedupeKey').lean(),
+    Notification.find(filter).sort(sort).skip(skip).limit(limit).select('-emailStatus -emailAttempts -emailClaimedUntil -dedupeKey').lean(),
     Notification.countDocuments(filter),
     Notification.countDocuments({ recipient: req.auth!.userId, readAt: null }),
   ]);

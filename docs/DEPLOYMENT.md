@@ -2,22 +2,25 @@
 
 `npm run db` is for development only. Production needs a managed or self-hosted MongoDB replica set with authentication and TLS.
 
-## Recommended setup: GitHub, Render and Vercel
+## Recommended setup: GitHub and Vercel
 
-The screens are hosted on **Vercel** and the API on **Render**. Vercel forwards every `/api` request to Render, so the browser sees one website and the `SameSite=Strict` sign-in cookies keep working.
+Everything runs on **Vercel** from one project at the repository root: the screens are static files and the API is one function (`api/index.js`, built from `backend/src/vercel.ts`). The database is **MongoDB Atlas** and files go to **Cloudinary**, which is required because a Vercel function has no lasting disk.
 
-The API does not run on Vercel itself. Vercel functions accept at most 4.5 MB per request, below the 5 MB upload limit, and the API runs jobs every minute.
+| File | Purpose |
+|---|---|
+| `vercel.json` | Build, the `/api` function, page routing, region and scheduled jobs |
+| `api/index.js` | Hands requests to the built API |
+| `backend/src/vercel.ts` | Connects to MongoDB once per instance and runs work that a server would run on a timer |
 
-| Piece | Where | Config file |
-|---|---|---|
-| Screens | Vercel, Root Directory `frontend` | `frontend/vercel.json` |
-| API and scheduled jobs | Render web service | `render.yaml` |
-| Database | MongoDB Atlas | |
-| Files | Cloudinary (required: Render's disk is wiped on every restart) | |
+How it differs from running `npm start` on a server:
 
-Render's free plan sleeps after 15 minutes without traffic. The first request then takes about a minute, and scheduled jobs (emails, reminders) do not run while it sleeps. Use a paid instance for real use.
+- **No timers.** Queued emails (and Outlook events) are sent straight after the request that caused them. Anything left over, such as a failed send, goes out with the next change or the next scheduled job.
+- **Scheduled jobs** come from Vercel Cron Jobs: `/api/cron/daily` at 18:35 UTC (00:05 India time) and `/api/cron/punch-reminder` at 05:30 UTC (11:00 India time). On the free Hobby plan they run once a day and can start up to 59 minutes late. Change the times in `vercel.json` if your company timezone or reminder time differs. They need `CRON_SECRET`; without it they do nothing.
+- **Uploads are limited to 4 MB**, because Vercel refuses requests over 4.5 MB.
+- **Rate limits are per function instance**, so they are weaker than on one server. Turn on Vercel's firewall rate limiting for `/api/auth/*` if you need more.
+- **Region** is `bom1` (Mumbai), next to the Atlas cluster. Change `regions` if your cluster is elsewhere.
 
-`ORIGIN_SECRET` must be the same long random value in Vercel and Render. The API refuses any `/api` request without it, so nobody can reach Render directly and fake their IP address. Set `TRUST_PROXY=2` for the two proxies, Vercel and Render's load balancer, and check that the audit log records real visitor addresses.
+Set `TRUST_PROXY=1`: Vercel puts the visitor's real address in `X-Forwarded-For`. Leave `ORIGIN_SECRET` empty, because the screens and API share one address.
 
 ## 1. MongoDB
 
