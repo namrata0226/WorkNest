@@ -57,7 +57,7 @@ export function DocumentUpload({ label = 'Supporting document', value, onChange,
   }
 
   return (
-    <Field label={label} required={required} error={uploadError ?? error} hint={uploading ? 'Uploading…' : 'PDF, PNG or JPEG, up to 5 MB'}>
+    <Field label={label} required={required} error={uploadError ?? error} hint={uploading ? 'Uploading…' : 'PDF, PNG or JPEG, up to 4 MB'}>
       <Input type="file" accept=".pdf,.png,.jpg,.jpeg" disabled={uploading} onChange={(e) => { const file = e.target.files?.[0]; e.target.value = ''; void onFile(file); }} />
     </Field>
   );

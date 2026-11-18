@@ -19,7 +19,7 @@ const schema = z.object({
   COOKIE_DOMAIN: z.string().optional(),
   TRUST_PROXY: z.coerce.number().int().min(0).default(0),
   UPLOAD_DIR: z.string().default('./uploads'),
-  MAX_UPLOAD_MB: z.coerce.number().positive().default(5),
+  MAX_UPLOAD_MB: z.coerce.number().positive().default(4),
   CLAMAV_HOST: z.string().optional(),
   CLAMAV_PORT: z.coerce.number().int().positive().default(3310),
   CLAMAV_REQUIRED: bool(false),
@@ -35,6 +35,8 @@ const schema = z.object({
   FIELD_ENCRYPTION_KEY: z.union([z.literal(''), z.string().regex(/^[0-9a-f]{64}$/, 'FIELD_ENCRYPTION_KEY must be 64 hexadecimal characters')]).optional(),
   /** When set, API requests must carry it in X-Origin-Secret, so only the Vercel proxy can reach the API. */
   ORIGIN_SECRET: z.string().optional(),
+  /** On Vercel, scheduled jobs call /api/cron/* with this as a Bearer token. Vercel sends it automatically. */
+  CRON_SECRET: z.string().optional(),
   MS_TENANT_ID: z.string().optional(),
   MS_CLIENT_ID: z.string().optional(),
   MS_CLIENT_SECRET: z.string().optional(),

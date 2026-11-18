@@ -92,6 +92,15 @@ describe('leave emails', () => {
     expect(sent()).toHaveLength(count);
   });
 
+  it('sends each email once when several senders run at the same time', async () => {
+    await applyLeave();
+    await Promise.all([flushEmailOutbox(), flushEmailOutbox(), flushEmailOutbox()]);
+    const subjects = sent().map((m) => `${m.to}|${m.subject}`);
+    expect(subjects.length).toBeGreaterThan(0);
+    expect(new Set(subjects).size).toBe(subjects.length);
+    expect(await Notification.countDocuments({ emailStatus: 'PENDING' })).toBe(0);
+  });
+
   it('goes to a Super Admin when the only HR person applies, since they cannot decide it', async () => {
     const admin = await makeSuperAdmin();
     expect((await hrAgent.post('/api/leaves').send(fullDay(cl, FRI))).status).toBe(201);

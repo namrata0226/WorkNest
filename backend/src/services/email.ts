@@ -3,7 +3,7 @@ import nodemailer, { Transporter } from 'nodemailer';
 import { env } from '../config/env';
 import { logger } from '../config/logger';
 import { EmailActionKind } from '../constants';
-import { Notification } from '../models/System';
+import { INotification, Notification } from '../models/System';
 import { createHash, randomBytes } from 'crypto';
 import { EmailActionToken } from '../models/People';
 import { IUser, User } from '../models/User';
@@ -76,24 +76,36 @@ export async function sendEmail(mail: { to: string; subject: string; text: strin
   }
 }
 
-/** Sends notifications committed with EMAIL pending. Delivery failures never touch the HR action that caused them. */
+/** How long a sender holds a notification. A sender that dies mid-send releases it when this runs out. */
+const CLAIM_MS = 5 * 60_000;
+
+/**
+ * Sends notifications committed with EMAIL pending. Delivery failures never touch the HR action that caused them.
+ * Each notification is claimed before sending, so overlapping runs (several servers, or one per request) never send it twice.
+ */
 export async function flushEmailOutbox(limit = 50): Promise<number> {
   if (!getTransport()) return 0;
-  const pending = await Notification.find({ emailStatus: 'PENDING' }).sort({ createdAt: 1 }).limit(limit).lean();
   let sent = 0;
-  for (const n of pending) {
+  for (let i = 0; i < limit; i++) {
+    const now = new Date();
+    const n = await Notification.findOneAndUpdate(
+      { emailStatus: 'PENDING', $or: [{ emailClaimedUntil: null }, { emailClaimedUntil: { $lte: now } }] },
+      { $set: { emailClaimedUntil: new Date(now.getTime() + CLAIM_MS) } },
+      { sort: { createdAt: 1 }, returnDocument: 'after' },
+    ).lean<INotification>();
+    if (!n) break;
     const user = await User.findById(n.recipient).select('email').lean<IUser>();
     if (!user) {
-      await Notification.updateOne({ _id: n._id }, { emailStatus: 'FAILED' });
+      await Notification.updateOne({ _id: n._id }, { emailStatus: 'FAILED', emailClaimedUntil: null });
       continue;
     }
     // Created here, at sending time, so the usable token is never stored anywhere.
     const actionToken = n.action ? await createEmailActionToken(n.recipient, n.action.kind, n.action.id) : null;
     const delivered = await sendEmail({ to: user.email, subject: n.title, ...renderNotificationEmail({ ...n, actionToken }) });
-    const attempts = n.emailAttempts + 1;
+    const attempts = (n.emailAttempts ?? 0) + 1;
     await Notification.updateOne(
       { _id: n._id },
-      { emailAttempts: attempts, emailStatus: delivered ? 'SENT' : attempts >= MAX_ATTEMPTS ? 'FAILED' : 'PENDING' },
+      { emailAttempts: attempts, emailClaimedUntil: null, emailStatus: delivered ? 'SENT' : attempts >= MAX_ATTEMPTS ? 'FAILED' : 'PENDING' },
     );
     if (delivered) sent++;
   }
