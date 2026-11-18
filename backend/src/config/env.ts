@@ -13,8 +13,9 @@ const schema = z.object({
   JWT_ACCESS_SECRET: z.string().min(32, 'JWT_ACCESS_SECRET must be at least 32 characters'),
   ACCESS_TOKEN_TTL_SECONDS: z.coerce.number().int().positive().default(900),
   REFRESH_TOKEN_TTL_DAYS: z.coerce.number().int().positive().default(14),
-  CORS_ORIGINS: z.string().default('http://localhost:5173'),
-  APP_URL: z.string().url().default('http://localhost:5173'),
+  /** Both default to this deployment's own address on Vercel, and to the local app otherwise. */
+  CORS_ORIGINS: z.string().optional(),
+  APP_URL: z.union([z.literal(''), z.string().url()]).optional(),
   COOKIE_SECURE: z.string().optional(),
   COOKIE_DOMAIN: z.string().optional(),
   TRUST_PROXY: z.coerce.number().int().min(0).default(0),
@@ -65,10 +66,22 @@ if (isProd && data.EMAIL_REDIRECT_TO) {
   throw new Error('EMAIL_REDIRECT_TO sends every employee\'s email to one inbox and is for testing only; remove it in production');
 }
 
+/**
+ * Vercel tells each deployment its own address: production gets the project's production domain,
+ * every other deployment gets its branch address, which stays the same across pushes to that branch.
+ */
+const vercelHost = process.env.VERCEL_ENV === 'production'
+  ? process.env.VERCEL_PROJECT_PRODUCTION_URL
+  : process.env.VERCEL_BRANCH_URL || process.env.VERCEL_URL;
+const appUrl = (data.APP_URL || (vercelHost ? `https://${vercelHost}` : 'http://localhost:5173')).replace(/\/+$/, '');
+const ownOrigins = [appUrl, ...[process.env.VERCEL_URL, process.env.VERCEL_BRANCH_URL].filter(Boolean).map((h) => `https://${h}`)];
+
 export const env = {
   ...data,
+  APP_URL: appUrl,
+  CORS_ORIGINS: data.CORS_ORIGINS || ownOrigins.join(','),
   isProd,
   isTest: data.NODE_ENV === 'test',
-  corsOrigins: data.CORS_ORIGINS.split(',').map((o) => o.trim()).filter(Boolean),
+  corsOrigins: [...new Set((data.CORS_ORIGINS || ownOrigins.join(',')).split(',').map((o) => o.trim()).filter(Boolean))],
   cookieSecure: data.COOKIE_SECURE === undefined || data.COOKIE_SECURE === '' ? isProd : data.COOKIE_SECURE === 'true',
 };

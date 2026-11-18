@@ -7,10 +7,10 @@ export const cx = (...parts: (string | false | null | undefined)[]) => parts.fil
 type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger';
 
 const BUTTON: Record<ButtonVariant, string> = {
-  primary: 'bg-brand text-white hover:bg-brand-strong',
-  secondary: 'bg-surface border border-line-strong text-ink hover:bg-paper',
+  primary: 'bg-brand text-white shadow-[0_1px_2px_rgba(10,68,63,0.25),inset_0_1px_0_rgba(255,255,255,0.08)] hover:bg-brand-strong',
+  secondary: 'bg-surface border border-line-strong text-ink shadow-[0_1px_2px_rgba(16,24,40,0.05)] hover:bg-paper hover:border-faint/50',
   ghost: 'text-muted hover:bg-paper hover:text-ink',
-  danger: 'bg-rose text-white hover:brightness-90',
+  danger: 'bg-rose text-white shadow-[0_1px_2px_rgba(180,35,60,0.25)] hover:brightness-95',
 };
 
 export function Button({ variant = 'secondary', loading, small, className, children, disabled, type = 'button', ...rest }: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: ButtonVariant; loading?: boolean; small?: boolean }) {
@@ -18,7 +18,7 @@ export function Button({ variant = 'secondary', loading, small, className, child
     <button
       type={type}
       disabled={disabled || loading}
-      className={cx('inline-flex items-center justify-center gap-1.5 rounded-md font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap', small ? 'px-2.5 py-1 text-xs' : 'px-3.5 py-2 text-[13px]', BUTTON[variant], className)}
+      className={cx('inline-flex items-center justify-center gap-1.5 rounded-lg font-medium transition-all active:translate-y-px disabled:opacity-50 disabled:cursor-not-allowed disabled:active:translate-y-0 whitespace-nowrap', small ? 'px-2.5 py-1 text-xs' : 'px-4 py-2 text-[13px]', BUTTON[variant], className)}
       {...rest}
     >
       {loading && <Spinner small />}
@@ -33,14 +33,14 @@ export function Spinner({ small }: { small?: boolean }) {
 
 export function Card({ title, actions, children, className, flush }: { title?: ReactNode; actions?: ReactNode; children: ReactNode; className?: string; flush?: boolean }) {
   return (
-    <section className={cx('rounded-lg border border-line bg-surface', className)}>
+    <section className={cx('overflow-hidden rounded-xl border border-line bg-surface shadow-[0_1px_2px_rgba(16,24,40,0.04)]', className)}>
       {(title || actions) && (
-        <header className="flex flex-wrap items-center justify-between gap-2 border-b border-line px-4 py-3">
-          <h2 className="text-[13.5px] font-semibold">{title}</h2>
+        <header className="flex flex-wrap items-center justify-between gap-2 border-b border-line px-5 py-3.5">
+          <h2 className="text-[14px] font-semibold tracking-tight">{title}</h2>
           {actions}
         </header>
       )}
-      <div className={flush ? '' : 'p-4'}>{children}</div>
+      <div className={flush ? '' : 'p-5'}>{children}</div>
     </section>
   );
 }
@@ -50,12 +50,12 @@ const TONE: Record<Tone, string> = {
   green: 'bg-brand-soft text-brand-strong',
   amber: 'bg-amber-soft text-amber',
   rose: 'bg-rose-soft text-rose',
-  gray: 'bg-paper text-muted border border-line',
+  gray: 'bg-paper text-muted ring-1 ring-inset ring-line',
   sky: 'bg-sky-soft text-sky',
 };
 
 export function Badge({ tone = 'gray', children }: { tone?: Tone; children: ReactNode }) {
-  return <span className={cx('inline-flex items-center rounded px-1.5 py-0.5 text-[11.5px] font-medium whitespace-nowrap', TONE[tone])}>{children}</span>;
+  return <span className={cx('inline-flex items-center rounded-full px-2 py-0.5 text-[11.5px] font-medium whitespace-nowrap', TONE[tone])}>{children}</span>;
 }
 
 export const StatusBadge = ({ status }: { status: string }) => <Badge tone={STATUS_TONE[status] ?? 'gray'}>{STATUS_LABEL[status] ?? status}</Badge>;
@@ -71,9 +71,9 @@ export function TypeTag({ type }: { type: { name?: string; code: string; color: 
 
 export function Stat({ label, value, hint, tone }: { label: string; value: ReactNode; hint?: ReactNode; tone?: 'brand' | 'amber' }) {
   return (
-    <div className="rounded-lg border border-line bg-surface px-4 py-3">
-      <div className="text-xs text-muted">{label}</div>
-      <div className={cx('tnum mt-1 text-[22px] font-semibold leading-tight', tone === 'brand' && 'text-brand', tone === 'amber' && 'text-amber')}>{value}</div>
+    <div className="rounded-xl border border-line bg-surface px-4 py-3.5 shadow-[0_1px_2px_rgba(16,24,40,0.04)] transition-shadow hover:shadow-[0_4px_14px_-6px_rgba(16,24,40,0.12)]">
+      <div className="text-[12px] font-medium text-muted">{label}</div>
+      <div className={cx('tnum mt-1.5 text-[24px] font-semibold leading-tight tracking-tight', tone === 'brand' && 'text-brand', tone === 'amber' && 'text-amber')}>{value}</div>
       {hint && <div className="mt-0.5 text-xs text-faint">{hint}</div>}
     </div>
   );
@@ -81,10 +81,10 @@ export function Stat({ label, value, hint, tone }: { label: string; value: React
 
 export function PageHeader({ title, subtitle, actions }: { title: string; subtitle?: ReactNode; actions?: ReactNode }) {
   return (
-    <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
+    <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
       <div>
-        <h1 className="text-xl font-semibold tracking-tight">{title}</h1>
-        {subtitle && <p className="mt-0.5 text-[13px] text-muted">{subtitle}</p>}
+        <h1 className="text-[22px] font-semibold tracking-tight">{title}</h1>
+        {subtitle && <p className="mt-1 text-[13.5px] text-muted">{subtitle}</p>}
       </div>
       {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
     </div>
@@ -92,12 +92,12 @@ export function PageHeader({ title, subtitle, actions }: { title: string; subtit
 }
 
 export function Note({ tone = 'rose', children }: { tone?: 'rose' | 'amber' | 'sky' | 'green'; children: ReactNode }) {
-  const map = { rose: 'bg-rose-soft text-rose', amber: 'bg-amber-soft text-amber', sky: 'bg-sky-soft text-sky', green: 'bg-brand-soft text-brand-strong' };
-  return <div role={tone === 'rose' ? 'alert' : 'status'} className={cx('rounded-md px-3 py-2 text-[13px]', map[tone])}>{children}</div>;
+  const map = { rose: 'bg-rose-soft text-rose border-rose/15', amber: 'bg-amber-soft text-amber border-amber/15', sky: 'bg-sky-soft text-sky border-sky/15', green: 'bg-brand-soft text-brand-strong border-brand/15' };
+  return <div role={tone === 'rose' ? 'alert' : 'status'} className={cx('rounded-lg border px-3.5 py-2.5 text-[13px]', map[tone])}>{children}</div>;
 }
 
 export function Empty({ children }: { children: ReactNode }) {
-  return <div className="px-4 py-8 text-center text-[13px] text-faint">{children}</div>;
+  return <div className="px-4 py-10 text-center text-[13px] text-faint">{children}</div>;
 }
 
 export function Loading() {
@@ -108,7 +108,7 @@ export function Loading() {
 export function Field({ label, error, hint, children, required }: { label: string; error?: string; hint?: ReactNode; children: ReactNode; required?: boolean }) {
   return (
     <label className="block">
-      <span className="mb-1 block text-xs font-medium text-muted">
+      <span className="mb-1.5 block text-[12.5px] font-medium text-ink/80">
         {label}
         {required && <span aria-hidden className="text-rose"> *</span>}
       </span>
@@ -121,7 +121,7 @@ export function Field({ label, error, hint, children, required }: { label: strin
 
 /** Full width unless the caller sets its own, as Tailwind's class order would otherwise decide the winner. */
 const controlWidth = (className?: string) => (/(^|\s)w-/.test(className ?? '') ? '' : 'w-full');
-const CONTROL = 'block rounded-md border border-line-strong bg-surface px-2.5 py-1.5 text-[13px] text-ink placeholder:text-faint focus:border-brand disabled:bg-paper disabled:text-muted';
+const CONTROL = 'block rounded-lg border border-line-strong bg-surface px-3 py-2 text-[13px] text-ink shadow-[0_1px_2px_rgba(16,24,40,0.04)] transition-shadow placeholder:text-faint hover:border-faint/60 focus:border-brand focus:outline-none focus:ring-4 focus:ring-brand/10 focus-visible:outline-none disabled:bg-paper disabled:text-muted';
 
 export const Input = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLInputElement>>(({ className, ...rest }, ref) => <input ref={ref} className={cx(CONTROL, controlWidth(className), className)} {...rest} />);
 Input.displayName = 'Input';
@@ -181,14 +181,14 @@ export function Modal({ title, onClose, children, footer, wide }: { title: React
   }, []);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-4 sm:p-8" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div ref={ref} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby={titleId} className={cx('w-full rounded-lg bg-surface shadow-xl focus:outline-none', wide ? 'max-w-3xl' : 'max-w-lg')}>
-        <header className="flex items-center justify-between gap-3 border-b border-line px-4 py-3">
-          <h2 id={titleId} className="text-[14px] font-semibold">{title}</h2>
-          <button type="button" aria-label="Close" onClick={onClose} className="rounded p-1 text-muted hover:bg-paper">✕</button>
+    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-[#0b1f1c]/45 p-4 backdrop-blur-[2px] sm:p-10" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+      <div ref={ref} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby={titleId} className={cx('w-full overflow-hidden rounded-2xl bg-surface shadow-2xl ring-1 ring-black/5 focus:outline-none', wide ? 'max-w-3xl' : 'max-w-lg')}>
+        <header className="flex items-center justify-between gap-3 border-b border-line px-5 py-4">
+          <h2 id={titleId} className="text-[15px] font-semibold tracking-tight">{title}</h2>
+          <button type="button" aria-label="Close" onClick={onClose} className="flex h-7 w-7 items-center justify-center rounded-lg text-muted hover:bg-paper hover:text-ink">✕</button>
         </header>
-        <div className="p-4">{children}</div>
-        {footer && <footer className="flex flex-wrap justify-end gap-2 border-t border-line px-4 py-3">{footer}</footer>}
+        <div className="p-5">{children}</div>
+        {footer && <footer className="flex flex-wrap justify-end gap-2 border-t border-line bg-paper/50 px-5 py-3.5">{footer}</footer>}
       </div>
     </div>
   );
@@ -209,9 +209,9 @@ export function DataTable<T>({ columns, rows, rowKey, loading, empty = 'Nothing 
     <div className={cx('overflow-x-auto', loading && 'opacity-60')}>
       <table className="w-full border-collapse text-left text-[13px]">
         <thead>
-          <tr className="border-b border-line text-xs text-muted">
+          <tr className="border-b border-line bg-paper/60 text-[11.5px] uppercase tracking-[0.04em] text-muted">
             {columns.map((c, i) => (
-              <th key={i} scope="col" className={cx('whitespace-nowrap px-4 py-2 font-medium', c.align === 'right' && 'text-right', c.align === 'center' && 'text-center')}>{c.header}</th>
+              <th key={i} scope="col" className={cx('whitespace-nowrap px-4 py-2.5 font-semibold', c.align === 'right' && 'text-right', c.align === 'center' && 'text-center')}>{c.header}</th>
             ))}
           </tr>
         </thead>
@@ -222,10 +222,10 @@ export function DataTable<T>({ columns, rows, rowKey, loading, empty = 'Nothing 
               onClick={onRowClick ? () => onRowClick(row) : undefined}
               onKeyDown={onRowClick ? (e) => e.key === 'Enter' && onRowClick(row) : undefined}
               tabIndex={onRowClick ? 0 : undefined}
-              className={cx('border-b border-line last:border-0', onRowClick && 'cursor-pointer hover:bg-paper')}
+              className={cx('border-b border-line transition-colors last:border-0 hover:bg-paper/50', onRowClick && 'cursor-pointer hover:bg-brand-soft/40')}
             >
               {columns.map((c, i) => (
-                <td key={i} className={cx('px-4 py-2.5 align-middle', c.align === 'right' && 'tnum text-right', c.align === 'center' && 'text-center', c.className)}>{c.cell(row)}</td>
+                <td key={i} className={cx('px-4 py-3 align-middle', c.align === 'right' && 'tnum text-right', c.align === 'center' && 'text-center', c.className)}>{c.cell(row)}</td>
               ))}
             </tr>
           ))}
@@ -238,7 +238,7 @@ export function DataTable<T>({ columns, rows, rowKey, loading, empty = 'Nothing 
 export function Pagination({ meta, onPage }: { meta: PageMeta | null; onPage: (page: number) => void }) {
   if (!meta || meta.totalPages <= 1) return null;
   return (
-    <nav aria-label="Pagination" className="flex items-center justify-between gap-2 border-t border-line px-4 py-2 text-xs text-muted">
+    <nav aria-label="Pagination" className="flex items-center justify-between gap-2 border-t border-line px-4 py-2.5 text-xs text-muted">
       <span className="tnum">Page {meta.page} of {meta.totalPages} · {meta.total} records</span>
       <span className="flex gap-1.5">
         <Button small disabled={meta.page <= 1} onClick={() => onPage(meta.page - 1)}>Previous</Button>
@@ -250,9 +250,9 @@ export function Pagination({ meta, onPage }: { meta: PageMeta | null; onPage: (p
 
 export function Tabs<T extends string>({ tabs, value, onChange }: { tabs: { value: T; label: ReactNode }[]; value: T; onChange: (v: T) => void }) {
   return (
-    <div role="tablist" className="inline-flex rounded-md border border-line-strong bg-surface p-0.5">
+    <div role="tablist" className="inline-flex rounded-lg border border-line bg-paper p-0.5">
       {tabs.map((t) => (
-        <button key={t.value} role="tab" type="button" aria-selected={t.value === value} onClick={() => onChange(t.value)} className={cx('rounded px-3 py-1 text-[13px] font-medium transition-colors', t.value === value ? 'bg-brand text-white' : 'text-muted hover:text-ink')}>
+        <button key={t.value} role="tab" type="button" aria-selected={t.value === value} onClick={() => onChange(t.value)} className={cx('rounded-md px-3 py-1 text-[13px] font-medium transition-all', t.value === value ? 'bg-surface text-brand shadow-[0_1px_2px_rgba(16,24,40,0.1)]' : 'text-muted hover:text-ink')}>
           {t.label}
         </button>
       ))}
@@ -278,7 +278,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       {children}
       <div aria-live="polite" className="fixed bottom-4 right-4 z-[60] flex max-w-sm flex-col gap-2">
         {toasts.map((t) => (
-          <div key={t.id} className={cx('rounded-md px-3.5 py-2.5 text-[13px] text-white shadow-lg', t.tone === 'ok' ? 'bg-nav' : 'bg-rose')}>{t.message}</div>
+          <div key={t.id} className={cx('rounded-xl px-4 py-3 text-[13px] text-white shadow-xl ring-1 ring-black/5', t.tone === 'ok' ? 'bg-nav' : 'bg-rose')}>{t.message}</div>
         ))}
       </div>
     </ToastContext.Provider>

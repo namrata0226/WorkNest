@@ -88,3 +88,36 @@ describe('form validation', () => {
     expect(errorsOf(compOffSchema.safeParse({ workedDate: '', dayType: 'FULL', reason: 'x' }))).toContain('workedDate');
   });
 });
+
+describe('menu', async () => {
+  const { visibleNav, sectionFor } = await import('../src/layouts/navigation');
+  const labels = (g: ReturnType<typeof visibleNav>) => g.flatMap((x) => x.sections.map((s) => `${s.label}:${s.tabs.map((t) => t.label).join('|')}`));
+
+  it('gives an employee a short menu, with no admin pages', () => {
+    const nav = visibleNav({ can: () => false, isEmployee: true, isManager: false, isApprover: false });
+    expect(labels(nav)).toEqual([
+      'Home:Home',
+      'Leave:Apply|My requests|Balances|Comp-Off',
+      'Calendar:My calendar|Team|Holidays',
+      'Attendance:My attendance',
+      'Expenses:My claims',
+      'Announcements:Announcements',
+    ]);
+  });
+
+  it('puts every calendar under one Calendar entry for HR', () => {
+    const nav = visibleNav({ can: () => true, isEmployee: true, isManager: true, isApprover: true });
+    expect(sectionFor(nav, '/admin/calendar')?.label).toBe('Calendar');
+    expect(sectionFor(nav, '/team-calendar')?.label).toBe('Calendar');
+    expect(sectionFor(nav, '/admin/employees/abc')?.label).toBe('People');
+    expect(sectionFor(nav, '/leaves/abc')?.label).toBe('Leave');
+    expect(nav.flatMap((g) => g.sections)).toHaveLength(10);
+  });
+
+  it('leaves out personal tabs for an account with no employee profile', () => {
+    const nav = visibleNav({ can: () => true, isEmployee: false, isManager: false, isApprover: true });
+    const calendar = nav.flatMap((g) => g.sections).find((s) => s.key === 'calendar')!;
+    expect(calendar.tabs.map((t) => t.to)).toEqual(['/admin/calendar', '/holidays']);
+    expect(nav.flatMap((g) => g.sections).some((s) => s.key === 'home')).toBe(false);
+  });
+});
