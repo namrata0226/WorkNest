@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import { Link, Navigate, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { Avatar } from '../components/Avatar';
+import { Loading } from '../components/ui';
 import { useAuth } from '../context/AuthContext';
 import { useFetch } from '../hooks/useFetch';
 import type { LeaveRequest, Permission } from '../types';
@@ -158,7 +159,9 @@ export function AppLayout() {
         </header>
         <main className="min-w-0 flex-1 overflow-y-auto px-4 py-5 sm:px-6">
           <div className="mx-auto max-w-6xl">
-            <Outlet />
+            <Suspense fallback={<Loading />}>
+              <Outlet />
+            </Suspense>
           </div>
         </main>
       </div>

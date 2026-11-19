@@ -3,22 +3,30 @@ import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { Loading, Note } from '../components/ui';
 import { useAuth } from '../context/AuthContext';
 import { AppLayout } from '../layouts/AppLayout';
-import { AnnouncementsPage } from '../pages/AnnouncementsPage';
-import { AttendancePage } from '../pages/AttendancePage';
-import { EmailActionPage } from '../pages/EmailActionPage';
-import { ExpensesPage } from '../pages/ExpensesPage';
-import { TeamCalendarPage } from '../pages/TeamCalendarPage';
-import { AccountPage, ForgotPasswordPage, LoginPage, ResetPasswordPage } from '../pages/AuthPages';
-import { ApplyLeavePage } from '../pages/ApplyLeavePage';
-import { ApprovalsPage } from '../pages/ApprovalsPage';
-import { BalancesPage } from '../pages/BalancesPage';
-import { CompOffPage } from '../pages/CompOffPage';
-import { DashboardPage } from '../pages/DashboardPage';
-import { HolidaysPage } from '../pages/HolidaysPage';
-import { LeaveDetailPage, MyLeavesPage } from '../pages/MyLeavesPage';
-import { MyCalendarPage } from '../pages/MyCalendarPage';
-import { NotificationsPage } from '../pages/NotificationsPage';
 import type { Permission } from '../types';
+
+// Every page is loaded on demand so the first visit (the login screen) downloads only
+// what it needs, and heavy pages — the FullCalendar views especially — stay out of the
+// initial bundle until someone opens them.
+const AnnouncementsPage = lazy(() => import('../pages/AnnouncementsPage').then((m) => ({ default: m.AnnouncementsPage })));
+const AttendancePage = lazy(() => import('../pages/AttendancePage').then((m) => ({ default: m.AttendancePage })));
+const EmailActionPage = lazy(() => import('../pages/EmailActionPage').then((m) => ({ default: m.EmailActionPage })));
+const ExpensesPage = lazy(() => import('../pages/ExpensesPage').then((m) => ({ default: m.ExpensesPage })));
+const TeamCalendarPage = lazy(() => import('../pages/TeamCalendarPage').then((m) => ({ default: m.TeamCalendarPage })));
+const AccountPage = lazy(() => import('../pages/AuthPages').then((m) => ({ default: m.AccountPage })));
+const ForgotPasswordPage = lazy(() => import('../pages/AuthPages').then((m) => ({ default: m.ForgotPasswordPage })));
+const LoginPage = lazy(() => import('../pages/AuthPages').then((m) => ({ default: m.LoginPage })));
+const ResetPasswordPage = lazy(() => import('../pages/AuthPages').then((m) => ({ default: m.ResetPasswordPage })));
+const ApplyLeavePage = lazy(() => import('../pages/ApplyLeavePage').then((m) => ({ default: m.ApplyLeavePage })));
+const ApprovalsPage = lazy(() => import('../pages/ApprovalsPage').then((m) => ({ default: m.ApprovalsPage })));
+const BalancesPage = lazy(() => import('../pages/BalancesPage').then((m) => ({ default: m.BalancesPage })));
+const CompOffPage = lazy(() => import('../pages/CompOffPage').then((m) => ({ default: m.CompOffPage })));
+const DashboardPage = lazy(() => import('../pages/DashboardPage').then((m) => ({ default: m.DashboardPage })));
+const HolidaysPage = lazy(() => import('../pages/HolidaysPage').then((m) => ({ default: m.HolidaysPage })));
+const MyLeavesPage = lazy(() => import('../pages/MyLeavesPage').then((m) => ({ default: m.MyLeavesPage })));
+const LeaveDetailPage = lazy(() => import('../pages/MyLeavesPage').then((m) => ({ default: m.LeaveDetailPage })));
+const MyCalendarPage = lazy(() => import('../pages/MyCalendarPage').then((m) => ({ default: m.MyCalendarPage })));
+const NotificationsPage = lazy(() => import('../pages/NotificationsPage').then((m) => ({ default: m.NotificationsPage })));
 
 const ExpensesAdminPage = lazy(() => import('../pages/admin/ExpensesAdminPage').then((m) => ({ default: m.ExpensesAdminPage })));
 const InsightsPage = lazy(() => import('../pages/admin/InsightsPage').then((m) => ({ default: m.InsightsPage })));
@@ -69,8 +77,9 @@ function Home() {
 
 export function AppRoutes() {
   const emp = (el: ReactNode) => <RequireEmployee>{el}</RequireEmployee>;
-  const perm = (permission: Permission, el: ReactNode) => <RequirePermission permission={permission}><Suspense fallback={<Loading />}>{el}</Suspense></RequirePermission>;
+  const perm = (permission: Permission, el: ReactNode) => <RequirePermission permission={permission}>{el}</RequirePermission>;
   return (
+    <Suspense fallback={<Loading />}>
     <Routes>
       <Route path="/login" element={<LoginPage />} />
       <Route path="/forgot-password" element={<ForgotPasswordPage />} />
@@ -87,7 +96,7 @@ export function AppRoutes() {
         <Route path="calendar" element={emp(<MyCalendarPage />)} />
         <Route path="attendance" element={emp(<AttendancePage />)} />
         <Route path="team-calendar" element={emp(<TeamCalendarPage />)} />
-        <Route path="team-attendance" element={emp(<Suspense fallback={<Loading />}><TeamAttendancePage /></Suspense>)} />
+        <Route path="team-attendance" element={emp(<TeamAttendancePage />)} />
         <Route path="expenses" element={emp(<ExpensesPage />)} />
         <Route path="announcements" element={<AnnouncementsPage />} />
         <Route path="holidays" element={<HolidaysPage />} />
@@ -117,5 +126,6 @@ export function AppRoutes() {
         <Route path="*" element={<Note tone="amber">This page does not exist.</Note>} />
       </Route>
     </Routes>
+    </Suspense>
   );
 }
