@@ -58,8 +58,9 @@ export const update: RequestHandler = async (req, res) => {
   if (!before) throw notFound('Holiday');
   const set = { ...body, ...(body.date ? { year: yearOf(body.date) } : {}) };
   const doc = await Holiday.findByIdAndUpdate(before._id, { $set: set }, { returnDocument: 'after', runValidators: true }).lean<IHoliday>();
+  if (!doc) throw notFound('Holiday');
   await audit(ctxOf(req), {
-    action: 'HOLIDAY_UPDATED', entityType: 'Holiday', entityId: before._id, summary: `${doc!.name} on ${doc!.date}`,
+    action: 'HOLIDAY_UPDATED', entityType: 'Holiday', entityId: before._id, summary: `${doc.name} on ${doc.date}`,
     before: { name: before.name, date: before.date, category: before.category }, after: body,
   });
   ok(res, doc);

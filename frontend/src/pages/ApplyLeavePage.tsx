@@ -2,7 +2,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { useEffect, useRef, useState } from 'react';
 import { useForm, useWatch } from 'react-hook-form';
 import { useNavigate } from 'react-router-dom';
-import { api, applyServerErrors } from '../api/client';
+import { api, applyServerErrors, errorMessage } from '../api/client';
 import { AttachedDocument, DocumentUpload } from '../components/DocumentUpload';
 import { Button, Card, Field, Input, Note, PageHeader, Select, Textarea, useToast } from '../components/ui';
 import { useAuth } from '../context/AuthContext';
@@ -47,6 +47,7 @@ export function ApplyLeavePage() {
   const balances = useFetch<BalanceRow[]>('/leave-balances/my');
   const [preview, setPreview] = useState<Preview | null>(null);
   const [previewing, setPreviewing] = useState(false);
+  const [previewError, setPreviewError] = useState<string | null>(null);
   const [document, setDocument] = useState<AttachedDocument | null>(null);
   const [uploading, setUploading] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
@@ -96,6 +97,7 @@ export function ApplyLeavePage() {
     const ready = leaveType && !ineligible && startDate && endDate && startDate <= endDate && (dayType === 'FULL' || halfSession);
     if (!ready) {
       setPreview(null);
+      setPreviewError(null);
       setPreviewing(false);
       return;
     }
@@ -103,8 +105,8 @@ export function ApplyLeavePage() {
     setPreviewing(true);
     const timer = setTimeout(() => {
       api.post('/leaves/preview', { leaveType, startDate, endDate, dayType, halfSession: dayType === 'HALF' ? halfSession : null })
-        .then((res) => { if (!stale) setPreview(res.data.data); })
-        .catch(() => { if (!stale) setPreview(null); })
+        .then((res) => { if (!stale) { setPreview(res.data.data); setPreviewError(null); } })
+        .catch((err) => { if (!stale) { setPreview(null); setPreviewError(errorMessage(err, 'The duration could not be calculated.')); } })
         .finally(() => { if (!stale) setPreviewing(false); });
     }, 250);
     return () => {
@@ -138,6 +140,7 @@ export function ApplyLeavePage() {
   return (
     <>
       <PageHeader title="Apply for leave" subtitle="Weekends and your applicable holidays are not charged" />
+      {(types.error || balances.error) && <div className="mb-4"><Note>{types.error ?? balances.error}</Note></div>}
       <form onSubmit={handleSubmit(onSubmit)} noValidate className="grid gap-4 lg:grid-cols-3">
         <Card className="lg:col-span-2">
           <div className="grid gap-3 sm:grid-cols-2">
@@ -188,7 +191,9 @@ export function ApplyLeavePage() {
 
         <div className="space-y-4">
           <Card title="Summary">
-            {!preview ? (
+            {!preview && previewError && !previewing ? (
+              <Note>{previewError}</Note>
+            ) : !preview ? (
               <p className="text-[13px] text-faint">{ineligible ? 'You cannot apply for this leave type.' : previewing ? 'Calculating…' : 'Choose a leave type and dates to see the duration.'}</p>
             ) : (
               <div className="space-y-3 text-[13px]">

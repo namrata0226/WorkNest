@@ -27,12 +27,20 @@ export async function syncAllEntitlements(today: string): Promise<void> {
     Employee.find({ employmentStatus: { $ne: 'INACTIVE' } }).lean<IEmployee[]>(),
     LeaveType.find({ isActive: true, kind: { $ne: 'COMP_OFF' } }).lean<ILeaveType[]>(),
   ]);
+  // One bad record must not hold back everyone after it. The next run retries whoever failed.
+  let failed = 0;
   for (const employee of employees) {
-    const policy = await resolvePolicy(employee, today);
-    for (const type of types) {
-      await syncEntitlement(employee, type, effectiveRule(type, policy, employee), year, today);
+    try {
+      const policy = await resolvePolicy(employee, today);
+      for (const type of types) {
+        await syncEntitlement(employee, type, effectiveRule(type, policy, employee), year, today);
+      }
+    } catch (err) {
+      failed++;
+      logger.error({ err: (err as Error).message, employee: String(employee._id) }, 'Entitlement sync failed for employee');
     }
   }
+  if (failed) throw new Error(`Entitlement sync failed for ${failed} of ${employees.length} employees`);
 }
 
 export async function remindUpcomingHolidays(today: string): Promise<number> {
@@ -122,15 +130,35 @@ export async function remindMissingPunches(now: Date = new Date()): Promise<numb
   return sent;
 }
 
+/**
+ * Steps within a group depend on each other and stop together; separate groups run regardless,
+ * so a balance problem never holds back comp-off expiry or reminders. Any failure still fails the run.
+ */
 export async function runDailyJobs(today?: string): Promise<void> {
   const date = today ?? (await companyToday());
-  await runCarryForward(yearOf(date));
-  await syncAllEntitlements(date);
-  await expireCarryForward(date);
-  await expireCompOffLots(date);
-  await warnExpiringCompOff(date);
-  await remindUpcomingHolidays(date);
-  await remindPendingApprovals();
+  const groups: [string, () => Promise<unknown>][] = [
+    ['balances', async () => {
+      await runCarryForward(yearOf(date));
+      await syncAllEntitlements(date);
+      await expireCarryForward(date);
+    }],
+    ['comp-off', async () => {
+      await expireCompOffLots(date);
+      await warnExpiringCompOff(date);
+    }],
+    ['holiday-reminders', () => remindUpcomingHolidays(date)],
+    ['approval-reminders', () => remindPendingApprovals()],
+  ];
+  const failed: string[] = [];
+  for (const [name, run] of groups) {
+    try {
+      await run();
+    } catch (err) {
+      failed.push(name);
+      logger.error({ err: (err as Error).message, step: name }, 'Daily job step failed');
+    }
+  }
+  if (failed.length) throw new Error(`Daily jobs failed: ${failed.join(', ')}`);
 }
 
 const guarded = (name: string, fn: () => Promise<unknown>) => async () => {

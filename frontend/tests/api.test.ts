@@ -55,6 +55,18 @@ describe('API client', () => {
     expect(listener).toHaveBeenCalledTimes(1);
   });
 
+  it('keeps the user signed in when the refresh fails for a reason other than the session', async () => {
+    api.defaults.adapter = async (config) => {
+      if (config.url === '/auth/refresh') throw fail(config, 503);
+      throw fail(config, 401);
+    };
+    const listener = vi.fn();
+    window.addEventListener(AUTH_EXPIRED_EVENT, listener);
+    await expect(api.get('/leaves/my')).rejects.toBeTruthy();
+    window.removeEventListener(AUTH_EXPIRED_EVENT, listener);
+    expect(listener).not.toHaveBeenCalled();
+  });
+
   it('never tries to refresh a failed login', async () => {
     session = 'dead';
     await expect(api.post('/auth/login', {})).rejects.toBeTruthy();
@@ -69,6 +81,12 @@ describe('server errors', () => {
   it('reads the message from the consistent error shape', () => {
     expect(errorMessage(err())).toBe('Top level');
     expect(errorMessage(new Error('network'))).toBe('Something went wrong. Please try again.');
+  });
+
+  it('never returns a blank message, and names a lost connection', () => {
+    const blank = new AxiosError('x', undefined, undefined, undefined, { data: '', status: 502, statusText: '', headers: {}, config: {} as InternalAxiosRequestConfig });
+    expect(errorMessage(blank)).toBe('Something went wrong. Please try again.');
+    expect(errorMessage(new AxiosError('Network Error', 'ERR_NETWORK'))).toMatch(/Could not reach the server/);
   });
 
   it('puts field errors on known fields and returns the rest', () => {

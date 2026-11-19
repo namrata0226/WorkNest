@@ -153,8 +153,9 @@ export const createAdmin: RequestHandler = async (req, res) => {
     if (!employee?.user) throw notFound('Employee account');
     if (String(employee.user) === String(ctx.auth?.userId)) throw forbidden('You cannot change your own role', 'SELF_ROLE_CHANGE');
     const user = await User.findByIdAndUpdate(employee.user, { role, permissions: customPermissions }, { returnDocument: 'after' }).lean<IUser>();
-    await audit(ctx, { action: 'ADMIN_PROMOTED', category: 'SECURITY', entityType: 'User', entityId: employee.user, summary: `${user!.email} is now ${role}` });
-    return created(res, { admin: await toAdminView(user!), activationLink: null });
+    if (!user) throw notFound('Employee account');
+    await audit(ctx, { action: 'ADMIN_PROMOTED', category: 'SECURITY', entityType: 'User', entityId: employee.user, summary: `${user.email} is now ${role}` });
+    return created(res, { admin: await toAdminView(user), activationLink: null });
   }
 
   if (await User.exists({ email })) throw conflict('An account with this email already exists', 'DUPLICATE_ACCOUNT');
@@ -185,10 +186,11 @@ export const updateAdmin: RequestHandler = async (req, res) => {
   const set: Record<string, unknown> = { ...body };
   if (nextRole !== ROLES.HR_ADMIN) set.permissions = null;
   const user = await User.findByIdAndUpdate(id, { $set: set }, { returnDocument: 'after' }).lean<IUser>();
+  if (!user) throw notFound('Account');
   if (body.isActive === false) await revokeAllSessions(target._id, 'DEACTIVATED');
   await audit(ctx, {
     action: 'ADMIN_UPDATED', category: 'SECURITY', entityType: 'User', entityId: id, summary: target.email,
     before: { role: target.role, permissions: target.permissions, isActive: target.isActive }, after: body,
   });
-  ok(res, await toAdminView(user!));
+  ok(res, await toAdminView(user));
 };

@@ -7,6 +7,15 @@ export async function downloadFile(url: string, params: Record<string, unknown>,
   try {
     res = await api.get(url, { params: clean, responseType: 'blob' });
   } catch (err) {
+    // With responseType 'blob' the JSON error body arrives as a Blob, so read it before looking for the message.
+    const response = (err as { response?: { data?: unknown } }).response;
+    if (response?.data instanceof Blob) {
+      try {
+        response.data = JSON.parse(await response.data.text());
+      } catch {
+        // Not JSON, so fall back to the status text.
+      }
+    }
     throw new Error(errorMessage(err, 'The download failed'));
   }
   const disposition = String(res.headers['content-disposition'] ?? '');

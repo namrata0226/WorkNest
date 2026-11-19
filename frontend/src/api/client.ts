@@ -26,8 +26,10 @@ api.interceptors.response.use(undefined, async (error: AxiosError) => {
   config._retried = true;
   try {
     await refreshSession();
-  } catch {
-    window.dispatchEvent(new Event(AUTH_EXPIRED_EVENT));
+  } catch (refreshError) {
+    // Only a refused refresh means the session is over. A network drop, rate limit or server error keeps the user signed in.
+    const status = (refreshError as AxiosError).response?.status;
+    if (status === 401 || status === 403) window.dispatchEvent(new Event(AUTH_EXPIRED_EVENT));
     throw error;
   }
   return api.request(config);
@@ -36,8 +38,13 @@ api.interceptors.response.use(undefined, async (error: AxiosError) => {
 interface ApiErrorBody { error?: { code?: string; message?: string; details?: ApiFieldError[] } }
 
 export function errorMessage(err: unknown, fallback = 'Something went wrong. Please try again.'): string {
-  const body = (err as AxiosError<ApiErrorBody>)?.response?.data;
-  return body?.error?.message ?? (err as AxiosError)?.response?.statusText ?? fallback;
+  const axiosErr = err as AxiosError<ApiErrorBody> | undefined;
+  const body = axiosErr?.response?.data;
+  if (body?.error?.message) return body.error.message;
+  // No response at all: offline, DNS failure, CORS, or the request timed out.
+  if (axiosErr?.isAxiosError && !axiosErr.response) return 'Could not reach the server. Check your connection and try again.';
+  // `||`, not `??`: over HTTP/2 the status text is an empty string, which would show a blank error.
+  return axiosErr?.response?.statusText || fallback;
 }
 
 export function errorCode(err: unknown): string | undefined {

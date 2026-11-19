@@ -3,7 +3,7 @@ import { env } from '../config/env';
 import { ACCESS_COOKIE, authenticate, REFRESH_COOKIE } from '../middleware/auth';
 import { ctxOf } from '../services/audit';
 import * as auth from '../services/auth';
-import { unauthorized } from '../utils/errors';
+import { AppError, unauthorized } from '../utils/errors';
 import { ok } from '../utils/http';
 
 const base: CookieOptions = {
@@ -43,7 +43,8 @@ export const refresh: RequestHandler = async (req, res) => {
     if (tokens) setCookies(res, tokens);
     ok(res, { refreshed: true });
   } catch (err) {
-    clearCookies(res);
+    // Only a refused token ends the session. A database blip must not sign the person out.
+    if (err instanceof AppError && err.status === 401) clearCookies(res);
     throw err;
   }
 };

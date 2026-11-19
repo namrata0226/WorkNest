@@ -42,8 +42,13 @@ const storageUnavailable = (err: unknown) => {
 
 async function writeBytes(storedName: string, buffer: Buffer, mime: string): Promise<IStoredFile['storage']> {
   if (!cloudinaryConfigured()) {
-    await fs.mkdir(uploadRoot(), { recursive: true, mode: 0o750 });
-    await fs.writeFile(path.join(uploadRoot(), storedName), buffer, { mode: 0o640 });
+    // A read-only or full disk (such as a serverless host with no Cloudinary set up) gets a clear 503, not a bare 500.
+    try {
+      await fs.mkdir(uploadRoot(), { recursive: true, mode: 0o750 });
+      await fs.writeFile(path.join(uploadRoot(), storedName), buffer, { mode: 0o640 });
+    } catch (err) {
+      throw storageUnavailable(err);
+    }
     return 'LOCAL';
   }
   try {
