@@ -38,7 +38,8 @@ async function accessToken(): Promise<string> {
     signal: AbortSignal.timeout(TIMEOUT_MS),
   });
   if (!res.ok) throw new Error(`Microsoft sign-in returned ${res.status}`);
-  const body = (await res.json()) as { access_token: string; expires_in: number };
+  const body = (await res.json()) as { access_token?: string; expires_in?: number };
+  if (!body.access_token || typeof body.expires_in !== 'number') throw new Error('Microsoft sign-in returned no access token');
   cachedToken = { value: body.access_token, expiresAt: Date.now() + (body.expires_in - 60) * 1000 };
   return body.access_token;
 }
@@ -125,7 +126,9 @@ export async function syncOutlookCalendars(limit = 50): Promise<number> {
   for (const request of toAdd) {
     const done = await attempt(request, async () => {
       const res = await graph('POST', mailboxPath(request.employee.email), token, outOfOfficeEvent(request, settings.timezone));
-      const event = (await res.json()) as { id: string };
+      const event = (await res.json()) as { id?: string };
+      // Without an id the event could never be removed later, so this counts as a failed attempt and is retried.
+      if (!event.id) throw new Error('Microsoft Graph returned an event with no id');
       await LeaveRequest.updateOne({ _id: request._id }, { outlookEventId: event.id });
     });
     if (done) changed++;
