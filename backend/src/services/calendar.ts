@@ -214,3 +214,94 @@ export async function monthlySummary(month: string, f: Pick<CalendarFilters, 'de
     rows: [...rows.values()].sort((a, b) => b.total - a.total || a.employeeName.localeCompare(b.employeeName)),
   };
 }
+
+export const SUMMARY_DETAIL_KINDS = ['active', 'onLeaveMonth', 'onLeaveToday', 'approvedDays', 'pending', 'peak'] as const;
+export type SummaryDetailKind = (typeof SUMMARY_DETAIL_KINDS)[number];
+
+type PersonOut = { _id: Types.ObjectId; fullName: string; employeeId: string; department: string | null; designation: string | null; avatarFile: Types.ObjectId | null };
+type LeaveOut = { requestId: Types.ObjectId; status: string; leaveType: { name: string; code: string; color: string } | null; startDate: string; endDate: string; days: number; halfDay: boolean; appliedAt: Date };
+
+/**
+ * The people or requests behind one summary card, with the same filters and the same rules as the counts,
+ * so a list always adds up to the number on the card it was opened from.
+ */
+export async function summaryDetails(month: string, kind: SummaryDetailKind, f: Pick<CalendarFilters, 'department' | 'leaveType' | 'search'> = {}) {
+  const { start, end } = monthRange(month);
+  const today = await companyToday();
+  const ids = await matchingEmployeeIds(f);
+  const restrict = ids ? { employee: { $in: ids } } : {};
+  const typeFilter = f.leaveType ? { leaveType: f.leaveType } : {};
+  const overlap = { startDate: { $lte: end }, endDate: { $gte: start } };
+
+  const person = (e: any): PersonOut => ({ _id: e._id, fullName: e.fullName, employeeId: e.employeeId, department: e.department?.name ?? null, designation: e.designation ?? null, avatarFile: e.avatarFile ?? null });
+  const populateEmployee = { path: 'employee', select: 'fullName employeeId designation avatarFile department', populate: { path: 'department', select: 'name' } };
+  const leaveOut = (r: any, inMonth = false): LeaveOut => ({
+    requestId: r._id,
+    status: r.status,
+    leaveType: r.leaveType ? { name: r.leaveType.name, code: r.leaveType.code, color: r.leaveType.color } : null,
+    startDate: r.startDate,
+    endDate: r.endDate,
+    days: inMonth ? r.dayBreakdown.filter((d: { date: string }) => d.date >= start && d.date <= end).reduce((s: number, d: { value: number }) => s + d.value, 0) : r.totalDays,
+    halfDay: r.dayType === 'HALF',
+    appliedAt: r.createdAt,
+  });
+
+  if (kind === 'active') {
+    const query: Record<string, unknown> = { employmentStatus: { $ne: 'INACTIVE' } };
+    if (f.department) query.department = f.department;
+    if (ids) query._id = { $in: ids };
+    const people = await Employee.find(query).sort({ fullName: 1 }).select('fullName employeeId designation avatarFile department').populate('department', 'name').lean<any[]>();
+    return { kind, month, people: people.map(person) };
+  }
+
+  if (kind === 'pending' || kind === 'onLeaveToday' || kind === 'approvedDays' || kind === 'onLeaveMonth') {
+    const query =
+      kind === 'pending' ? { status: LEAVE_STATUS.PENDING, ...overlap }
+        : kind === 'onLeaveToday' ? { status: { $in: CONFIRMED_LEAVE_STATUSES }, 'dayBreakdown.date': today }
+          : { status: { $in: CONFIRMED_LEAVE_STATUSES }, ...overlap };
+    const requests = await LeaveRequest.find({ ...query, ...restrict, ...typeFilter })
+      .sort({ startDate: 1, createdAt: 1 })
+      .populate(populateEmployee)
+      .populate('leaveType', 'name code color')
+      .lean<any[]>();
+    const rows = requests
+      .filter((r) => r.employee)
+      .map((r) => ({ employee: person(r.employee), leave: leaveOut(r, kind === 'approvedDays' || kind === 'onLeaveMonth') }))
+      // Leave whose charged days all fall outside the month (e.g. only a weekend overlaps) does not count.
+      .filter((r) => kind === 'pending' || kind === 'onLeaveToday' || r.leave.days > 0);
+
+    if (kind !== 'onLeaveMonth') return { kind, month, today, requests: rows };
+
+    // One row per person, with every leave they take in the month.
+    const byPerson = new Map<string, { employee: PersonOut; days: number; leaves: LeaveOut[] }>();
+    for (const r of rows) {
+      const key = String(r.employee._id);
+      const entry = byPerson.get(key) ?? { employee: r.employee, days: 0, leaves: [] };
+      entry.days += r.leave.days;
+      entry.leaves.push(r.leave);
+      byPerson.set(key, entry);
+    }
+    return { kind, month, people: [...byPerson.values()].sort((a, b) => b.days - a.days || a.employee.fullName.localeCompare(b.employee.fullName)) };
+  }
+
+  // peak: the busiest date(s), with who is away on each.
+  const confirmed = await LeaveRequest.find({ status: { $in: CONFIRMED_LEAVE_STATUSES }, ...overlap, ...restrict, ...typeFilter })
+    .populate(populateEmployee)
+    .populate('leaveType', 'name code color')
+    .lean<any[]>();
+  const byDate = new Map<string, Map<string, { employee: PersonOut; leaveType: LeaveOut['leaveType']; value: number }>>();
+  for (const r of confirmed) {
+    if (!r.employee) continue;
+    for (const d of r.dayBreakdown as { date: string; value: number }[]) {
+      if (d.date < start || d.date > end) continue;
+      const day = byDate.get(d.date) ?? new Map();
+      day.set(String(r.employee._id), { employee: person(r.employee), leaveType: r.leaveType ? { name: r.leaveType.name, code: r.leaveType.code, color: r.leaveType.color } : null, value: d.value });
+      byDate.set(d.date, day);
+    }
+  }
+  const peak = Math.max(0, ...[...byDate.values()].map((m) => m.size));
+  const dates = peak
+    ? [...byDate.entries()].filter(([, m]) => m.size === peak).sort(([a], [b]) => a.localeCompare(b)).map(([date, m]) => ({ date, people: [...m.values()].sort((a, b) => a.employee.fullName.localeCompare(b.employee.fullName)) }))
+    : [];
+  return { kind, month, peak, dates };
+}

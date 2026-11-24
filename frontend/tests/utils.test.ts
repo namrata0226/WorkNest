@@ -1,3 +1,5 @@
+import { formatDuration, formatReminder, formatTime, layoutLanes, monthGrid, shiftMonth, weekStart } from '../src/utils/planner';
+import { periodError, periodLabel, periodParams, periodRange } from '../src/components/PeriodPicker';
 import { describe, expect, it } from 'vitest';
 import { addOneDay } from '../src/utils/calendar';
 import { days, formatDate, formatMonth, formatRange, toDateOnly } from '../src/utils/date';
@@ -86,5 +88,106 @@ describe('form validation', () => {
     expect(holidaySchema.safeParse(h).success).toBe(true);
     expect(errorsOf(holidaySchema.safeParse({ ...h, category: 'NOPE' }))).toContain('category');
     expect(errorsOf(compOffSchema.safeParse({ workedDate: '', dayType: 'FULL', reason: 'x' }))).toContain('workedDate');
+  });
+});
+
+describe('menu', async () => {
+  const { visibleNav, sectionFor } = await import('../src/layouts/navigation');
+  const labels = (g: ReturnType<typeof visibleNav>) => g.flatMap((x) => x.sections.map((s) => `${s.label}:${s.tabs.map((t) => t.label).join('|')}`));
+
+  it('gives an employee a short menu, with no admin pages', () => {
+    const nav = visibleNav({ can: () => false, isEmployee: true, isManager: false, isApprover: false });
+    expect(labels(nav)).toEqual([
+      'Home:Home',
+      'Leave:Apply|My requests|Balances|Comp-Off',
+      'Calendar:My calendar|Team|Holidays',
+      'Attendance:My attendance',
+      'Expenses:My claims',
+      'Announcements:Announcements',
+    ]);
+  });
+
+  it('puts every calendar under one Calendar entry for HR', () => {
+    const nav = visibleNav({ can: () => true, isEmployee: true, isManager: true, isApprover: true });
+    expect(sectionFor(nav, '/admin/calendar')?.label).toBe('Calendar');
+    expect(sectionFor(nav, '/team-calendar')?.label).toBe('Calendar');
+    expect(sectionFor(nav, '/admin/employees/abc')?.label).toBe('People');
+    expect(sectionFor(nav, '/leaves/abc')?.label).toBe('Leave');
+    expect(nav.flatMap((g) => g.sections)).toHaveLength(10);
+  });
+
+  it('leaves out personal tabs for an account with no employee profile', () => {
+    const nav = visibleNav({ can: () => true, isEmployee: false, isManager: false, isApprover: true });
+    const calendar = nav.flatMap((g) => g.sections).find((s) => s.key === 'calendar')!;
+    expect(calendar.tabs.map((t) => t.to)).toEqual(['/admin/calendar', '/holidays']);
+    expect(nav.flatMap((g) => g.sections).some((s) => s.key === 'home')).toBe(false);
+  });
+});
+
+describe('attendance periods', () => {
+  const today = '2026-11-23'; // a Monday
+  const base = { month: '2026-11', from: '', to: '' };
+  it.each([
+    ['this-month', '2026-11-01', '2026-11-30'],
+    ['last-month', '2026-10-01', '2026-10-31'],
+    ['this-week', '2026-11-23', '2026-11-29'],
+    ['last-7', '2026-11-17', '2026-11-23'],
+    ['last-30', '2026-10-25', '2026-11-23'],
+    ['this-year', '2026-01-01', '2026-11-23'],
+  ] as const)('works out %s', (kind, from, to) => {
+    expect(periodRange({ ...base, kind }, today)).toEqual({ from, to });
+  });
+
+  it('crosses into the previous year for last month in January', () => {
+    expect(periodRange({ ...base, kind: 'last-month' }, '2027-01-10')).toEqual({ from: '2026-12-01', to: '2026-12-31' });
+  });
+
+  it('handles a chosen month, including February in a leap year', () => {
+    expect(periodRange({ ...base, kind: 'month', month: '2028-02' }, today)).toEqual({ from: '2028-02-01', to: '2028-02-29' });
+  });
+
+  it('checks custom dates before asking the server', () => {
+    expect(periodParams({ kind: 'custom', month: '', from: '2026-11-01', to: '' }, today)).toBeNull();
+    expect(periodError({ kind: 'custom', month: '', from: '2026-11-10', to: '2026-11-01' })).toBe('The end date cannot be before the start date');
+    expect(periodError({ kind: 'custom', month: '', from: '2025-01-01', to: '2026-11-01' })).toBe('Choose a period of at most 366 days');
+    expect(periodParams({ kind: 'custom', month: '', from: '2026-10-15', to: '2026-11-14' }, today)).toEqual({ from: '2026-10-15', to: '2026-11-14' });
+  });
+
+  it('labels whole months by name and other periods by dates', () => {
+    expect(periodLabel({ ...base, kind: 'last-month' }, today)).toBe('October 2026');
+    expect(periodLabel({ kind: 'custom', month: '', from: '2026-11-03', to: '2026-11-09' }, today)).toBe('3 Nov – 9 Nov 2026');
+  });
+});
+
+describe('calendar planner helpers', () => {
+  it('starts weeks on Monday and builds a six-week month grid', () => {
+    expect(weekStart('2026-11-29')).toBe('2026-11-23');
+    expect(weekStart('2026-11-23')).toBe('2026-11-23');
+    const grid = monthGrid('2026-11');
+    expect(grid).toHaveLength(42);
+    expect(grid[0]).toBe('2026-10-26');
+    expect(shiftMonth('2026-01', -1)).toBe('2025-12');
+    expect(shiftMonth('2026-12', 1)).toBe('2027-01');
+  });
+
+  it('formats times on a 12-hour clock', () => {
+    expect(formatTime('13:30')).toBe('1:30 PM');
+    expect(formatTime('00:05')).toBe('12:05 AM');
+    expect(formatDuration('13:30', '14:30')).toBe('1 hour');
+    expect(formatDuration('09:30', '11:00')).toBe('1 hour 30 min');
+    expect(formatReminder(10)).toBe('10 min before');
+    expect(formatReminder(1440)).toBe('1 day before');
+  });
+
+  it('puts overlapping events in separate lanes, and others in one', () => {
+    const laid = layoutLanes([
+      { id: 'a', start: 600, end: 660 },
+      { id: 'b', start: 630, end: 700 },
+      { id: 'c', start: 720, end: 780 },
+    ]);
+    const by = Object.fromEntries(laid.map((l) => [l.id, l]));
+    expect([by.a.lane, by.a.lanes]).toEqual([0, 2]);
+    expect([by.b.lane, by.b.lanes]).toEqual([1, 2]);
+    expect([by.c.lane, by.c.lanes]).toEqual([0, 1]);
   });
 });

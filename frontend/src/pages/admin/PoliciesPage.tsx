@@ -122,7 +122,7 @@ function PolicyModal({ policy, onClose, onDone }: { policy: Policy | null; onClo
       wide
       title={policy ? `Edit ${policy.name}` : 'Add leave policy'}
       onClose={onClose}
-      footer={<><Button onClick={onClose}>Cancel</Button><Button variant="primary" loading={busy} disabled={!name.trim() || !effectiveFrom} onClick={() => void save()}>Save policy</Button></>}
+      footer={<><Button onClick={onClose}>Cancel</Button><Button variant="primary" loading={busy} disabled={!name.trim() || !effectiveFrom} onClick={() => save()}>Save policy</Button></>}
     >
       <div className="grid gap-3 sm:grid-cols-2">
         {error && <div className="sm:col-span-2"><Note>{error}</Note></div>}

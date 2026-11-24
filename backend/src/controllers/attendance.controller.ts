@@ -6,10 +6,9 @@ import { todayIn } from '../utils/dates';
 import { created, ok, pageMeta, pageOptions } from '../utils/http';
 import { WfhRequest } from '../models/Attendance';
 
-const defaultMonth = async () => todayIn((await getSettings()).timezone).slice(0, 7);
 
 export const myMonth: RequestHandler = async (req, res) => {
-  ok(res, await service.employeeMonth(req.auth!.employeeId!, req.valid.query.month ?? await defaultMonth()));
+  ok(res, await service.employeeRange(req.auth!.employeeId!, await service.resolvePeriod(req.valid.query)));
 };
 export const myToday: RequestHandler = async (req, res) => ok(res, await service.todayAttendance(req.auth!.employeeId!));
 export const punchIn: RequestHandler = async (req, res) => ok(res, await service.punchIn(ctxOf(req)));
@@ -24,7 +23,7 @@ export const daily: RequestHandler = async (req, res) => {
 };
 
 export const employeeMonth: RequestHandler = async (req, res) => {
-  ok(res, await service.employeeMonth(req.valid.params.employeeId, req.valid.query.month ?? await defaultMonth()));
+  ok(res, await service.employeeRange(req.valid.params.employeeId, await service.resolvePeriod(req.valid.query)));
 };
 
 export const correct: RequestHandler = async (req, res) => {
@@ -41,7 +40,7 @@ export const myWfh: RequestHandler = async (req, res) => {
   ok(res, items, pageMeta(q, total));
 };
 
-export const pendingWfh: RequestHandler = async (req, res) => ok(res, await service.pendingWfh(req.auth!));
+export const pendingWfh: RequestHandler = async (req, res) => ok(res, await service.pendingWfh(req.auth!, req.valid.query.view));
 export const approveWfh: RequestHandler = async (req, res) => ok(res, await service.approveWfh(ctxOf(req), req.valid.params.id));
 export const rejectWfh: RequestHandler = async (req, res) => ok(res, await service.rejectWfh(ctxOf(req), req.valid.params.id, req.valid.body.reason));
 export const cancelWfh: RequestHandler = async (req, res) => ok(res, await service.cancelWfh(ctxOf(req), req.valid.params.id));

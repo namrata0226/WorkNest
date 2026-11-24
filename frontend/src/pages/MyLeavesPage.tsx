@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api, errorMessage } from '../api/client';
-import { Button, Card, DataTable, Field, Loading, Modal, Note, PageHeader, Pagination, Select, StatusBadge, Textarea, TypeTag, useToast } from '../components/ui';
+import { Button, Card, DataTable, Field, Loading, Modal, Note, PageHeader, Pagination, Select, StatusBadge, Textarea, TypeTag, useConfirm, useToast } from '../components/ui';
 import { useAuth } from '../context/AuthContext';
 import { useFetch } from '../hooks/useFetch';
 import type { LeaveRequest } from '../types';
@@ -97,6 +97,7 @@ export function LeaveDetailPage() {
   const { id } = useParams();
   const { user } = useAuth();
   const toast = useToast();
+  const confirm = useConfirm();
   const { data: request, loading, error, reload } = useFetch<LeaveRequest>(`/leaves/${id}`);
   const [asking, setAsking] = useState(false);
   const [reason, setReason] = useState('');
@@ -123,6 +124,17 @@ export function LeaveDetailPage() {
     }
   };
 
+  const withdraw = async () => {
+    const ok = await confirm({
+      title: 'Withdraw this leave request?',
+      message: `Your ${request.leaveType.name} request for ${formatRange(request.startDate, request.endDate)} will be withdrawn and the reserved days returned to your balance.`,
+      confirmLabel: 'Withdraw request',
+      cancelLabel: 'Keep request',
+      tone: 'danger',
+    });
+    if (ok) await act(() => api.patch(`/leaves/${id}/cancel`, {}), 'Request withdrawn');
+  };
+
   return (
     <>
       <PageHeader
@@ -131,7 +143,7 @@ export function LeaveDetailPage() {
         actions={mine && (
           <>
             {request.status === 'PENDING' && (
-              <Button variant="danger" loading={busy} onClick={() => void act(() => api.patch(`/leaves/${id}/cancel`, {}), 'Request withdrawn')}>Withdraw request</Button>
+              <Button variant="danger" loading={busy} onClick={() => withdraw()}>Withdraw request</Button>
             )}
             {request.status === 'APPROVED' && <Button onClick={() => setAsking(true)}>Request cancellation</Button>}
           </>
@@ -159,7 +171,7 @@ export function LeaveDetailPage() {
           footer={
             <>
               <Button onClick={() => setAsking(false)}>Keep leave</Button>
-              <Button variant="primary" loading={busy} disabled={!reason.trim()} onClick={() => void act(() => api.post(`/leaves/${id}/cancellation-request`, { reason }), 'Cancellation requested')}>Send request</Button>
+              <Button variant="primary" loading={busy} disabled={!reason.trim()} onClick={() => act(() => api.post(`/leaves/${id}/cancellation-request`, { reason: reason.trim() }), 'Cancellation requested')}>Send request</Button>
             </>
           }
         >

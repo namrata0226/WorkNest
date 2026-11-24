@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { PERMISSIONS as P } from '../constants';
 import * as attendanceC from '../controllers/attendance.controller';
 import * as authC from '../controllers/auth.controller';
+import * as calendarItemC from '../controllers/calendarItem.controller';
 import * as balanceC from '../controllers/balance.controller';
 import * as compOffC from '../controllers/compoff.controller';
 import * as employeeC from '../controllers/employee.controller';
@@ -78,7 +79,7 @@ export function buildApiRouter(limits: ReturnType<typeof createLimiters>): Route
   attendance.post('/punch-out', limits.sensitive, requireEmployeeProfile, validate({ body: v.emptyBody }), attendanceC.punchOut);
   attendance.post('/corrections', limits.sensitive, requireEmployeeProfile, validate({ body: v.correctionRequestBody }), peopleC.requestCorrection);
   attendance.get('/corrections/my', requireEmployeeProfile, peopleC.myCorrections);
-  attendance.get('/corrections/pending', peopleC.pendingCorrections);
+  attendance.get('/corrections/pending', validate({ query: v.approvalViewQuery }), peopleC.pendingCorrections);
   attendance.patch('/corrections/:id/approve', limits.sensitive, validate({ params: idParams, body: v.emptyBody }), peopleC.approveCorrection);
   attendance.patch('/corrections/:id/reject', limits.sensitive, validate({ params: idParams, body: v.reasonBody }), peopleC.rejectCorrection);
   attendance.patch('/corrections/:id/cancel', limits.sensitive, requireEmployeeProfile, validate({ params: idParams, body: v.emptyBody }), peopleC.cancelCorrection);
@@ -94,7 +95,7 @@ export function buildApiRouter(limits: ReturnType<typeof createLimiters>): Route
   const wfh = Router();
   wfh.post('/', limits.sensitive, requireEmployeeProfile, validate({ body: v.wfhApplyBody }), attendanceC.applyWfh);
   wfh.get('/my', requireEmployeeProfile, validate({ query: v.wfhListQuery }), attendanceC.myWfh);
-  wfh.get('/pending', attendanceC.pendingWfh);
+  wfh.get('/pending', validate({ query: v.approvalViewQuery }), attendanceC.pendingWfh);
   wfh.patch('/:id/approve', limits.sensitive, validate({ params: idParams, body: v.emptyBody }), attendanceC.approveWfh);
   wfh.patch('/:id/reject', limits.sensitive, validate({ params: idParams, body: v.reasonBody }), attendanceC.rejectWfh);
   wfh.patch('/:id/cancel', limits.sensitive, validate({ params: idParams, body: v.emptyBody }), attendanceC.cancelWfh);
@@ -123,7 +124,7 @@ export function buildApiRouter(limits: ReturnType<typeof createLimiters>): Route
   const expenses = Router();
   expenses.post('/', limits.sensitive, requireEmployeeProfile, validate({ body: v.expenseBody }), peopleC.submitExpense);
   expenses.get('/my', requireEmployeeProfile, validate({ query: v.wfhListQuery }), peopleC.myExpenses);
-  expenses.get('/pending', peopleC.pendingExpenses);
+  expenses.get('/pending', validate({ query: v.approvalViewQuery }), peopleC.pendingExpenses);
   expenses.get('/', requirePermission(P.EXPENSES_MANAGE), validate({ query: v.expenseListQuery }), peopleC.allExpenses);
   expenses.patch('/:id/approve', limits.sensitive, validate({ params: idParams, body: v.emptyBody }), peopleC.approveExpense);
   expenses.patch('/:id/reject', limits.sensitive, validate({ params: idParams, body: v.reasonBody }), peopleC.rejectExpense);
@@ -153,7 +154,7 @@ export function buildApiRouter(limits: ReturnType<typeof createLimiters>): Route
 
   /* Approvals. Whether the caller may act on a specific request is decided in the service. */
   const approvals = Router();
-  approvals.get('/pending', validate({ query: v.myLeavesQuery }), leaveC.pendingApprovals);
+  approvals.get('/pending', validate({ query: v.approvalsQuery }), leaveC.pendingApprovals);
   approvals.patch('/:id/approve', limits.sensitive, validate({ params: idParams, body: v.commentBody }), leaveC.approve);
   approvals.patch('/:id/reject', limits.sensitive, validate({ params: idParams, body: v.reasonBody }), leaveC.reject);
   approvals.patch('/:id/cancellation/approve', limits.sensitive, requirePermission(P.LEAVE_APPROVE), validate({ params: idParams, body: v.commentBody }), leaveC.approveCancellation);
@@ -198,7 +199,14 @@ export function buildApiRouter(limits: ReturnType<typeof createLimiters>): Route
   const calendar = Router();
   calendar.get('/company', requirePermission(P.CALENDAR_READ), validate({ query: v.calendarQuery }), insightC.company);
   calendar.get('/employee', validate({ query: v.calendarQuery }), insightC.employee);
+  // Everyone's own events and tasks, plus company-wide ones.
+  calendar.get('/items', validate({ query: v.dateRangeQuery }), calendarItemC.list);
+  calendar.post('/items', limits.sensitive, validate({ body: v.calendarItemBody }), calendarItemC.create);
+  calendar.put('/items/:id', limits.sensitive, validate({ params: idParams, body: v.calendarItemBody }), calendarItemC.update);
+  calendar.patch('/items/:id/done', limits.sensitive, validate({ params: idParams, body: v.calendarItemDoneBody }), calendarItemC.setDone);
+  calendar.delete('/items/:id', limits.sensitive, validate({ params: idParams }), calendarItemC.remove);
   calendar.get('/summary', requirePermission(P.CALENDAR_READ), validate({ query: v.summaryQuery }), insightC.summary);
+  calendar.get('/summary/details', requirePermission(P.CALENDAR_READ), validate({ query: v.summaryDetailsQuery }), insightC.summaryDetail);
   calendar.get('/export', requirePermission(P.CALENDAR_READ), validate({ query: v.calendarExportQuery }), insightC.exportCalendar);
   api.use('/calendar', calendar);
 

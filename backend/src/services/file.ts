@@ -22,7 +22,22 @@ export const uploadRoot = () => path.resolve(env.UPLOAD_DIR);
 const MAX_AVATAR_BYTES = 2 * 1024 * 1024;
 const STORAGE_TIMEOUT_MS = 30_000;
 
-export const cloudinaryConfigured = () => Boolean(env.CLOUDINARY_CLOUD_NAME && env.CLOUDINARY_API_KEY && env.CLOUDINARY_API_SECRET);
+/**
+ * Cloud names are lowercase IDs from the Cloudinary dashboard (e.g. "dq3x9abcd"). A display name such as "LeaveHub"
+ * is rejected by Cloudinary on every call, so it is treated as not set: files go to local disk and the log says why.
+ */
+export const validCloudName = (name: string | undefined) => Boolean(name && /^[a-z0-9_-]+$/.test(name));
+
+let warnedBadCloudName = false;
+export const cloudinaryConfigured = () => {
+  if (!env.CLOUDINARY_CLOUD_NAME || !env.CLOUDINARY_API_KEY || !env.CLOUDINARY_API_SECRET) return false;
+  if (validCloudName(env.CLOUDINARY_CLOUD_NAME)) return true;
+  if (!warnedBadCloudName) {
+    warnedBadCloudName = true;
+    logger.warn('CLOUDINARY_CLOUD_NAME is not a Cloudinary cloud name (use the lowercase "Cloud name" from the Cloudinary dashboard, e.g. dq3x9abcd). Storing files on local disk instead.');
+  }
+  return false;
+};
 
 function cloud() {
   cloudinary.config({ cloud_name: env.CLOUDINARY_CLOUD_NAME, api_key: env.CLOUDINARY_API_KEY, api_secret: env.CLOUDINARY_API_SECRET, secure: true });
@@ -34,9 +49,17 @@ function cloud() {
 const cloudOptions = { resource_type: 'raw', type: 'authenticated' } as const;
 const cloudId = (storedName: string) => `leave-hub/${storedName}`;
 
+/** Cloudinary rejecting our own credentials: no retry will help, so the log says what to change. */
+const CONFIG_ERROR = /cloud_name|api_key|api_secret|Invalid Signature|Must supply/i;
+
 const storageUnavailable = (err: unknown) => {
   // Cloudinary's errors are plain objects, and only the message is safe to log.
-  logger.error({ err: (err as { message?: string; error?: { message?: string } }).error?.message ?? (err as Error).message }, 'File storage failed');
+  const message = (err as { message?: string; error?: { message?: string } }).error?.message ?? (err as Error).message;
+  if (message && CONFIG_ERROR.test(message)) {
+    logger.error({ err: message }, 'File storage is misconfigured: check CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY and CLOUDINARY_API_SECRET against the Cloudinary dashboard');
+  } else {
+    logger.error({ err: message }, 'File storage failed');
+  }
   return new AppError(503, 'STORAGE_UNAVAILABLE', 'File storage is unavailable. Try again later.');
 };
 

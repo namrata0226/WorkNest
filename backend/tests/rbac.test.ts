@@ -204,3 +204,26 @@ describe('input validation', () => {
     expect(paths).toEqual(expect.arrayContaining(['employeeId', 'fullName', 'email', 'joiningDate']));
   });
 });
+
+describe('no favours to yourself', () => {
+  it('stops HR adding leave or Comp-Off to their own balance, but allows it for others', async () => {
+    const cl = await typeId('CL');
+    const mine = await hrAgent.post('/api/leave-balances/adjustment').send({ employee: String(hr.employee._id), leaveType: cl, year: 2030, amount: 5, kind: 'CREDIT', reason: 'Bonus' });
+    expect(mine.status).toBe(403);
+    expect(mine.body.error.code).toBe('OWN_RECORD');
+    expect((await hrAgent.post('/api/compoff/manual').send({ employee: String(hr.employee._id), amount: 2, reason: 'Bonus' })).status).toBe(403);
+    expect((await hrAgent.post('/api/leave-balances/adjustment').send({ employee: String(other.employee._id), leaveType: cl, year: 2030, amount: 1, kind: 'CREDIT', reason: 'Bonus' })).status).toBe(201);
+  });
+
+  it("stops HR editing their own employee record, which decides their leave", async () => {
+    const res = await hrAgent.put(`/api/employees/${hr.employee._id}`).send({ gender: 'FEMALE' });
+    expect(res.status).toBe(403);
+    expect((await hrAgent.put(`/api/employees/${other.employee._id}`).send({ designation: 'Lead' })).status).toBe(200);
+  });
+
+  it('still lets a Super Admin edit their own record', async () => {
+    const admin = await makePerson({ role: 'SUPER_ADMIN' });
+    const agent = await agentFor(admin.email);
+    expect((await agent.put(`/api/employees/${admin.employee._id}`).send({ designation: 'Director' })).status).toBe(200);
+  });
+});

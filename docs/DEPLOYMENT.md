@@ -47,8 +47,8 @@ Copy `backend/.env.example` and set at least:
 | `NODE_ENV` | `production` |
 | `MONGODB_URI` | The application user's connection string, with TLS |
 | `JWT_ACCESS_SECRET` | A long random value: `node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"`. The server refuses placeholder values. |
-| `CORS_ORIGINS` | Your exact app origin |
-| `APP_URL` | Your app URL, used in password links |
+| `CORS_ORIGINS` | Your exact app origin. On Vercel, leave it unset: it defaults to the deployment's own address. |
+| `APP_URL` | Your app URL, used in email links. On Vercel, leave it unset: production uses the project's production domain and other deployments their branch address. Set it only for a custom domain that is not the production domain. |
 | `TRUST_PROXY` | The number of proxies in front of the app, usually `1`. Rate limits and audit IPs are wrong without this. |
 | `UPLOAD_DIR` | A private, persistent, backed-up volume outside any web root |
 | `CLIENT_DIST` | `../frontend/dist` to serve the app from Express |

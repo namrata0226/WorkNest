@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { api, errorMessage } from '../../api/client';
-import { Button, Card, DataTable, Loading, Note, PageHeader, Pagination, Select, StatusBadge, TypeTag, useToast } from '../../components/ui';
+import { Button, Card, DataTable, Loading, Note, PageHeader, Pagination, Select, StatusBadge, TypeTag, useConfirm, useToast } from '../../components/ui';
 import { useAuth } from '../../context/AuthContext';
 import { useFetch } from '../../hooks/useFetch';
 import type { BalanceRow, Employee, LedgerRow, LeaveRequest } from '../../types';
@@ -16,6 +16,7 @@ export function EmployeeDetailPage() {
   const { id } = useParams();
   const { can, user } = useAuth();
   const toast = useToast();
+  const confirm = useConfirm();
   const [year, setYear] = useState(currentYear());
   const [leavePage, setLeavePage] = useState(1);
   const [ledgerPage, setLedgerPage] = useState(1);
@@ -36,7 +37,10 @@ export function EmployeeDetailPage() {
   const isSelf = user?.employee?._id === e._id;
 
   const setStatus = async (status: Employee['employmentStatus']) => {
-    if (status === 'INACTIVE' && !window.confirm(`Deactivate ${e.fullName}? They lose access at once and pending requests are withdrawn. Their history is kept.`)) return;
+    const ok = status === 'INACTIVE'
+      ? await confirm({ title: `Deactivate ${e.fullName}?`, message: 'They lose access at once and pending requests are withdrawn. Their history is kept.', confirmLabel: 'Deactivate', tone: 'danger' })
+      : await confirm({ title: `Reactivate ${e.fullName}?`, message: 'They can sign in again straight away.', confirmLabel: 'Reactivate' });
+    if (!ok) return;
     try {
       await api.patch(`/employees/${e._id}/status`, { status });
       toast(status === 'INACTIVE' ? 'Employee deactivated' : 'Status updated');
@@ -70,11 +74,11 @@ export function EmployeeDetailPage() {
         subtitle={<StatusBadge status={e.employmentStatus} />}
         actions={can('employees:write') && (
           <>
-            <Button onClick={() => void sendLink()}>Send password link</Button>
+            <Button onClick={() => sendLink()}>Send password link</Button>
             <Button onClick={() => setEditing(true)}>Edit</Button>
             {!isSelf && (e.employmentStatus === 'INACTIVE'
-              ? <Button onClick={() => void setStatus('ACTIVE')}>Reactivate</Button>
-              : <Button variant="danger" onClick={() => void setStatus('INACTIVE')}>Deactivate</Button>)}
+              ? <Button onClick={() => setStatus('ACTIVE')}>Reactivate</Button>
+              : <Button variant="danger" onClick={() => setStatus('INACTIVE')}>Deactivate</Button>)}
           </>
         )}
       />

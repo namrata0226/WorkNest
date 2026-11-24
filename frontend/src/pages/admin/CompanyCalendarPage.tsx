@@ -7,6 +7,7 @@ import { downloadFile } from '../../services/download';
 import type { LeaveRequest, LeaveType, Named } from '../../types';
 import { formatDate, formatMonth, todayString } from '../../utils/date';
 import { ApprovalTrail, LeaveSummary } from '../MyLeavesPage';
+import { SummaryKind, SummaryListModal } from './SummaryListModal';
 
 interface SummaryRow {
   employeeRef: string;
@@ -54,6 +55,7 @@ export function CompanyCalendarPage() {
   const [leaveType, setLeaveType] = useState('');
   const [status, setStatus] = useState('');
   const [selected, setSelected] = useState<string | null>(null);
+  const [listing, setListing] = useState<SummaryKind | null>(null);
   const [tablePage, setTablePage] = useState(1);
   const [tableMonth, setTableMonth] = useState(todayString().slice(0, 7));
   const [exporting, setExporting] = useState<string | null>(null);
@@ -98,19 +100,21 @@ export function CompanyCalendarPage() {
         actions={
           <>
             <Tabs value={view} onChange={setView} tabs={[{ value: 'calendar', label: 'Calendar' }, { value: 'table', label: 'Table' }]} />
-            <Button loading={exporting === 'xlsx'} onClick={() => void exportAs('xlsx')}>Excel</Button>
-            <Button loading={exporting === 'csv'} onClick={() => void exportAs('csv')}>CSV</Button>
+            <Button loading={exporting === 'xlsx'} onClick={() => exportAs('xlsx')}>Excel</Button>
+            <Button loading={exporting === 'csv'} onClick={() => exportAs('csv')}>CSV</Button>
           </>
         }
       />
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
-        <Stat label="Active employees" value={c?.totalActiveEmployees ?? '–'} />
-        <Stat label="On leave this month" value={c?.employeesOnLeaveThisMonth ?? '–'} />
-        <Stat label="On leave today" value={c?.employeesCurrentlyOnLeave ?? '–'} tone="brand" />
-        <Stat label="Approved leave days" value={c?.totalApprovedLeaveDays ?? '–'} />
-        <Stat label="Pending requests" value={c?.pendingLeaveRequests ?? '–'} tone={c?.pendingLeaveRequests ? 'amber' : undefined} />
+        <Stat label="Active employees" value={c?.totalActiveEmployees ?? '–'} onClick={() => setListing('active')} />
+        <Stat label="On leave this month" value={c?.employeesOnLeaveThisMonth ?? '–'} onClick={() => setListing('onLeaveMonth')} />
+        <Stat label="On leave today" value={c?.employeesCurrentlyOnLeave ?? '–'} tone="brand" onClick={() => setListing('onLeaveToday')} />
+        <Stat label="Approved leave days" value={c?.totalApprovedLeaveDays ?? '–'} onClick={() => setListing('approvedDays')} actionLabel="View requests" />
+        <Stat label="Pending requests" value={c?.pendingLeaveRequests ?? '–'} tone={c?.pendingLeaveRequests ? 'amber' : undefined} onClick={() => setListing('pending')} actionLabel="View requests" />
         <Stat
+          onClick={() => setListing('peak')}
+          actionLabel="See who is away"
           label="Highest absence"
           value={c?.maxAbsence.count ? `${c.maxAbsence.count} people` : '–'}
           hint={c?.maxAbsence.dates.length ? `${formatDate(c.maxAbsence.dates[0])}${c.maxAbsence.dates.length > 1 ? ` +${c.maxAbsence.dates.length - 1} more` : ''}` : 'No leave this month'}
@@ -171,6 +175,7 @@ export function CompanyCalendarPage() {
         </Card>
       )}
 
+      {listing && <SummaryListModal kind={listing} month={month} filters={filters} onClose={() => setListing(null)} onOpenLeave={setSelected} />}
       {selected && <LeaveDetailsModal id={selected} onClose={() => setSelected(null)} />}
     </>
   );

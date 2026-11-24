@@ -5,7 +5,7 @@ import FullCalendar from '@fullcalendar/react';
 import { useRef, useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { api, applyServerErrors, errorMessage } from '../../api/client';
-import { Badge, Button, Card, Checkbox, CheckboxGroup, DataTable, Field, Input, Modal, Note, PageHeader, Select, Tabs, Textarea, useToast } from '../../components/ui';
+import { Badge, Button, Card, Checkbox, CheckboxGroup, DataTable, Field, Input, Modal, Note, PageHeader, Select, Tabs, Textarea, useConfirm, useToast } from '../../components/ui';
 import { useFetch } from '../../hooks/useFetch';
 import { downloadFile, uploadImport } from '../../services/download';
 import type { ApiFieldError, Holiday, Named } from '../../types';
@@ -21,6 +21,7 @@ const TOOLBAR = { left: 'prev,next', center: 'title', right: '' };
 
 export function HolidaysAdminPage() {
   const toast = useToast();
+  const confirm = useConfirm();
   const [year, setYear] = useState(currentYear());
   const [view, setView] = useState<'list' | 'calendar'>('list');
   const [editing, setEditing] = useState<Holiday | 'new' | null>(null);
@@ -33,7 +34,7 @@ export function HolidaysAdminPage() {
   const names = (ids: string[], list: Named[] | null) => ids.map((id) => list?.find((x) => x._id === id)?.name ?? '').filter(Boolean).join(', ');
 
   const copyPrevious = async () => {
-    if (!window.confirm(`Copy the ${year - 1} holidays into ${year}? Festival dates usually move, so check each one afterwards.`)) return;
+    if (!(await confirm({ title: `Copy ${year - 1} holidays into ${year}?`, message: 'Festival dates usually move, so check each one afterwards.', confirmLabel: 'Copy holidays' }))) return;
     try {
       const res = await api.post('/holidays/copy', { fromYear: year - 1, toYear: year });
       const { copied, skipped } = res.data.data;
@@ -45,8 +46,8 @@ export function HolidaysAdminPage() {
   };
 
   const remove = async (h: Holiday) => {
-    const note = h.recurring ? ' It repeats every year, so it will be removed from all years.' : '';
-    if (!window.confirm(`Delete ${h.name}?${note} Leave already approved keeps its recorded duration.`)) return;
+    const note = h.recurring ? 'It repeats every year, so it will be removed from all years. ' : '';
+    if (!(await confirm({ title: `Delete ${h.name}?`, message: `${note}Leave already approved keeps its recorded duration.`, confirmLabel: 'Delete holiday', tone: 'danger' }))) return;
     try {
       await api.delete(`/holidays/${h._id}`);
       toast('Holiday deleted');
@@ -92,9 +93,9 @@ export function HolidaysAdminPage() {
         <Input aria-label="Year" type="number" className="w-24" value={year} onChange={(e) => setYear(Number(e.target.value) || currentYear())} />
         <input ref={fileRef} type="file" accept=".csv,.xlsx" hidden aria-label="Import holidays file" onChange={(e) => void onImport(e.target.files?.[0])} />
         <Button onClick={() => fileRef.current?.click()}>Import</Button>
-        <Button onClick={() => void exportAs('xlsx')}>Export Excel</Button>
-        <Button onClick={() => void exportAs('csv')}>Export CSV</Button>
-        <Button onClick={() => void copyPrevious()}>Copy from {year - 1}</Button>
+        <Button onClick={() => exportAs('xlsx')}>Export Excel</Button>
+        <Button onClick={() => exportAs('csv')}>Export CSV</Button>
+        <Button onClick={() => copyPrevious()}>Copy from {year - 1}</Button>
       </div>
 
       {importResult && (
@@ -132,7 +133,7 @@ export function HolidaysAdminPage() {
                 cell: (h) => (
                   <span className="flex justify-end gap-1">
                     <Button small variant="ghost" onClick={() => setEditing(h)}>Edit</Button>
-                    <Button small variant="ghost" onClick={() => void remove(h)}>Delete</Button>
+                    <Button small variant="ghost" className="text-rose" onClick={() => remove(h)}>Delete</Button>
                   </span>
                 ),
               },

@@ -69,8 +69,8 @@ export function ReportsPage() {
         subtitle={meta.hint}
         actions={
           <>
-            <Button loading={exporting === 'xlsx'} onClick={() => void exportAs('xlsx')}>Export Excel</Button>
-            <Button loading={exporting === 'csv'} onClick={() => void exportAs('csv')}>Export CSV</Button>
+            <Button loading={exporting === 'xlsx'} onClick={() => exportAs('xlsx')}>Export Excel</Button>
+            <Button loading={exporting === 'csv'} onClick={() => exportAs('csv')}>Export CSV</Button>
           </>
         }
       />

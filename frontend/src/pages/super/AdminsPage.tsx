@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { api, errorMessage, fieldErrors } from '../../api/client';
-import { Badge, Button, Card, CheckboxGroup, DataTable, Field, Input, Modal, Note, PageHeader, Pagination, Select, useToast } from '../../components/ui';
+import { Badge, Button, Card, CheckboxGroup, DataTable, Field, Input, Modal, Note, PageHeader, Pagination, Select, useConfirm, useToast } from '../../components/ui';
 import { useAuth } from '../../context/AuthContext';
 import { useFetch } from '../../hooks/useFetch';
 import type { Employee, Role } from '../../types';
@@ -112,7 +112,7 @@ function CreateModal({ assignable, onClose, onDone }: { assignable: string[]; on
     <Modal
       title="Add admin"
       onClose={onClose}
-      footer={<><Button onClick={onClose}>Cancel</Button><Button variant="primary" loading={busy} disabled={mode === 'new' ? !email : !employee} onClick={() => void save()}>Add admin</Button></>}
+      footer={<><Button onClick={onClose}>Cancel</Button><Button variant="primary" loading={busy} disabled={mode === 'new' ? !email : !employee} onClick={() => save()}>Add admin</Button></>}
     >
       <div className="space-y-3">
         {error && <Note>{error}</Note>}
@@ -151,7 +151,10 @@ function EditModal({ admin, assignable, onClose, onDone }: { admin: AdminRow; as
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const confirm = useConfirm();
+
   const save = async () => {
+    if (admin.isActive && !isActive && !(await confirm({ title: `Deactivate ${admin.email}?`, message: 'They are signed out and can no longer sign in until reactivated.', confirmLabel: 'Deactivate', tone: 'danger' }))) return;
     setBusy(true);
     setError(null);
     try {
@@ -168,7 +171,7 @@ function EditModal({ admin, assignable, onClose, onDone }: { admin: AdminRow; as
     <Modal
       title={`Edit ${admin.email}`}
       onClose={onClose}
-      footer={<><Button onClick={onClose}>Cancel</Button><Button variant="primary" loading={busy} onClick={() => void save()}>Save</Button></>}
+      footer={<><Button onClick={onClose}>Cancel</Button><Button variant="primary" loading={busy} onClick={() => save()}>Save</Button></>}
     >
       <div className="space-y-3">
         {error && <Note>{error}</Note>}

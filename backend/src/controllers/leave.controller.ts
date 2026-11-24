@@ -12,7 +12,7 @@ import { effectiveRule, ineligibleReason, resolvePolicy } from '../services/poli
 import { companyToday } from '../services/settings';
 import { yearOf } from '../utils/dates';
 import { badRequest, notFound } from '../utils/errors';
-import { created, escapeRegex, ok, pageMeta, pageOptions } from '../utils/http';
+import { ApprovalView, created, escapeRegex, ok, pageMeta, pageOptions } from '../utils/http';
 
 const SORTABLE = ['startDate', 'endDate', 'createdAt', 'status', 'totalDays'];
 
@@ -115,23 +115,39 @@ export const requestCancellation: RequestHandler = async (req, res) => {
 export const pendingApprovals: RequestHandler = async (req, res) => {
   const auth = req.auth!;
   const q = req.valid.query;
+  const view: ApprovalView = q.view ?? 'PENDING';
   const filter: Record<string, unknown> = {};
+  // Decided history keeps CANCELLED/CANCELLATION_REQUESTED leaves under "approved", since they were approved first.
+  const statusFor: Record<ApprovalView, unknown> = {
+    PENDING: undefined,
+    APPROVED: { $in: [LEAVE_STATUS.APPROVED, LEAVE_STATUS.CANCELLATION_REQUESTED] },
+    REJECTED: LEAVE_STATUS.REJECTED,
+    ALL: undefined,
+  };
 
   if (can(auth, PERMISSIONS.LEAVE_APPROVE)) {
-    filter.status = { $in: [LEAVE_STATUS.PENDING, LEAVE_STATUS.CANCELLATION_REQUESTED] };
-    if (auth.role !== 'SUPER_ADMIN') {
-      filter.$or = [{ status: LEAVE_STATUS.CANCELLATION_REQUESTED }, { currentApproverType: { $ne: 'SUPER_ADMIN' } }];
+    if (view === 'PENDING') {
+      filter.status = { $in: [LEAVE_STATUS.PENDING, LEAVE_STATUS.CANCELLATION_REQUESTED] };
+      if (auth.role !== 'SUPER_ADMIN') {
+        filter.$or = [{ status: LEAVE_STATUS.CANCELLATION_REQUESTED }, { currentApproverType: { $ne: 'SUPER_ADMIN' } }];
+      }
+    } else if (statusFor[view]) {
+      filter.status = statusFor[view];
     }
     if (auth.employeeId) filter.employee = { $ne: auth.employeeId };
   } else {
     if (!auth.employeeId) return ok(res, [], pageMeta(q, 0));
     const reports = await Employee.find({ reportingManager: auth.employeeId }).select('_id').lean<IEmployee[]>();
-    filter.status = LEAVE_STATUS.PENDING;
-    filter.currentApproverType = 'REPORTING_MANAGER';
     filter.employee = { $in: reports.map((r) => r._id) };
+    if (view === 'PENDING') {
+      filter.status = LEAVE_STATUS.PENDING;
+      filter.currentApproverType = 'REPORTING_MANAGER';
+    } else if (statusFor[view]) {
+      filter.status = statusFor[view];
+    }
   }
 
-  const { skip, limit, sort } = pageOptions({ ...q, order: q.sort ? q.order : 'asc' }, SORTABLE, 'createdAt');
+  const { skip, limit, sort } = pageOptions({ ...q, order: q.sort ? q.order : view === 'PENDING' ? 'asc' : 'desc' }, SORTABLE, 'createdAt');
   const [items, total] = await Promise.all([
     withRefs(LeaveRequest.find(filter).sort(sort).skip(skip).limit(limit)).lean(),
     LeaveRequest.countDocuments(filter),

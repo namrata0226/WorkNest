@@ -58,7 +58,7 @@ function OrgSection({ title, path, extraField, extraLabel }: { title: string; pa
         <Modal
           title={editing === 'new' ? `Add to ${title.toLowerCase()}` : `Edit ${editing.name}`}
           onClose={() => setEditing(null)}
-          footer={<><Button onClick={() => setEditing(null)}>Cancel</Button><Button variant="primary" loading={busy} disabled={!name.trim()} onClick={() => void save()}>Save</Button></>}
+          footer={<><Button onClick={() => setEditing(null)}>Cancel</Button><Button variant="primary" loading={busy} disabled={!name.trim()} onClick={() => save()}>Save</Button></>}
         >
           <div className="space-y-3">
             {formError && <Note>{formError}</Note>}

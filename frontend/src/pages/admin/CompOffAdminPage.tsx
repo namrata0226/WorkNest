@@ -2,7 +2,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { useEffect, useRef, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { api, applyServerErrors, errorMessage } from '../../api/client';
-import { Button, Card, Checkbox, DataTable, Field, Input, Modal, Note, PageHeader, Pagination, Select, StatusBadge, Tabs, Textarea, useToast } from '../../components/ui';
+import { Button, Card, Checkbox, DataTable, Field, Input, Modal, Note, PageHeader, Pagination, Select, StatusBadge, Tabs, Textarea, usePrompt, useSingleFlight, useToast } from '../../components/ui';
 import { useFetch } from '../../hooks/useFetch';
 import type { CompOffRequest, CompOffTx, Employee } from '../../types';
 import { formatDate, formatDateTime } from '../../utils/date';
@@ -36,7 +36,8 @@ export function CompOffAdminPage() {
 }
 
 function RequestsTab() {
-  const [status, setStatus] = useState('PENDING');
+  // All statuses by default, so a request stays listed, with its outcome, after it is decided.
+  const [status, setStatus] = useState('');
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
   const [deciding, setDeciding] = useState<CompOffRequest | null>(null);
@@ -105,8 +106,8 @@ function DecideModal({ request, onClose, onDone }: { request: CompOffRequest; on
       onClose={onClose}
       footer={
         <>
-          <Button variant="danger" loading={busy} disabled={!comment.trim()} title={comment.trim() ? undefined : 'Enter a reason to reject'} onClick={() => void decide(false)}>Reject</Button>
-          <Button variant="primary" loading={busy} onClick={() => void decide(true)}>Approve and credit</Button>
+          <Button variant="danger" loading={busy} disabled={!comment.trim()} title={comment.trim() ? undefined : 'Enter a reason to reject'} onClick={() => decide(false)}>Reject</Button>
+          <Button variant="primary" loading={busy} onClick={() => decide(true)}>Approve and credit</Button>
         </>
       }
     >
@@ -123,14 +124,23 @@ function DecideModal({ request, onClose, onDone }: { request: CompOffRequest; on
 
 function RecordsTab() {
   const toast = useToast();
+  const prompt = usePrompt();
   const [employee, setEmployee] = useState('');
   const [page, setPage] = useState(1);
   const employees = useFetch<Employee[]>('/employees', { limit: 200, sort: 'fullName', order: 'asc' });
   const { data, meta, loading, error, reload } = useFetch<CompOffTx[]>('/compoff/transactions', { employee, page, limit: 25 });
 
-  const changeExpiry = async (t: CompOffTx) => {
-    const next = window.prompt('New expiry date (YYYY-MM-DD)', t.expiresOn ?? '');
-    if (!next) return;
+  const [changeExpiry] = useSingleFlight(async (t: CompOffTx) => {
+    const next = await prompt({
+      title: 'Change expiry date',
+      message: `${t.employee?.fullName ?? 'This credit'}: ${t.remaining} day(s) left.`,
+      label: 'New expiry date',
+      type: 'date',
+      defaultValue: t.expiresOn ?? '',
+      required: true,
+      confirmLabel: 'Save date',
+    });
+    if (!next || next === t.expiresOn) return;
     try {
       await api.patch(`/compoff/credits/${t._id}/expiry`, { expiresOn: next });
       toast('Expiry updated');
@@ -138,7 +148,7 @@ function RecordsTab() {
     } catch (err) {
       toast(errorMessage(err), 'error');
     }
-  };
+  });
 
   return (
     <>

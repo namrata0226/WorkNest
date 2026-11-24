@@ -72,7 +72,7 @@ function WorkflowModal({ workflow, onClose, onDone }: { workflow: Workflow | nul
     <Modal
       title={workflow ? `Edit ${workflow.name}` : 'Add workflow'}
       onClose={onClose}
-      footer={<><Button onClick={onClose}>Cancel</Button><Button variant="primary" loading={busy} disabled={!name.trim() || !steps.length} onClick={() => void save()}>Save</Button></>}
+      footer={<><Button onClick={onClose}>Cancel</Button><Button variant="primary" loading={busy} disabled={!name.trim() || !steps.length} onClick={() => save()}>Save</Button></>}
     >
       <div className="space-y-3">
         {error && <Note>{error}</Note>}

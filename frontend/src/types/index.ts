@@ -21,11 +21,15 @@ export interface AttendanceDay {
   correctionNote: string | null;
 }
 
-export interface AttendanceSummary { present: number; workFromHome: number; onLeave: number; absent: number }
+/** `attended` = present + work from home, out of `workingDays` (present + WFH + leave + absent). */
+export interface AttendanceSummary { present: number; workFromHome: number; attended: number; onLeave: number; absent: number; workingDays: number }
 
 export interface AttendanceMonth {
   today: string;
   month: string;
+  /** The period the days cover. */
+  from?: string;
+  to?: string;
   employee: { _id: string; fullName: string; employeeId: string };
   days: AttendanceDay[];
   summary: AttendanceSummary;
@@ -85,6 +89,7 @@ export interface AttendanceCorrection {
   punchOut: string | null;
   reason: string;
   status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED';
+  decidedByName?: string | null;
   rejectionReason: string | null;
   createdAt: string;
 }
@@ -98,6 +103,7 @@ export interface ExpenseClaim {
   description: string;
   receipt: { _id: string; originalName: string } | null;
   status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'PAID' | 'CANCELLED';
+  decidedByName?: string | null;
   rejectionReason: string | null;
   createdAt: string;
 }
@@ -274,3 +280,25 @@ export interface PageMeta { page: number; limit: number; total: number; totalPag
 export interface ApiFieldError { path: string; message: string }
 
 export interface NotificationItem { _id: string; type: string; title: string; message: string; link: string | null; readAt: string | null; createdAt: string }
+
+export type CalendarItemKind = 'EVENT' | 'TASK';
+export type CalendarItemColor = 'brand' | 'sky' | 'violet' | 'amber' | 'rose' | 'slate';
+export interface CalendarItem {
+  _id: string;
+  owner: string;
+  ownerName: string;
+  kind: CalendarItemKind;
+  title: string;
+  description: string | null;
+  location: string | null;
+  date: string;
+  endDate: string;
+  allDay: boolean;
+  startTime: string | null;
+  endTime: string | null;
+  color: CalendarItemColor;
+  visibility: 'PRIVATE' | 'COMPANY';
+  reminderMinutes: number | null;
+  done: boolean;
+  doneAt: string | null;
+}

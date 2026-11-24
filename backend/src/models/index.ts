@@ -1,4 +1,5 @@
 export * from './Attendance';
+export * from './CalendarItem';
 export * from './CompOff';
 export * from './Employee';
 export * from './Holiday';

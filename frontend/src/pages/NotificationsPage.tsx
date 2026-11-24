@@ -39,7 +39,7 @@ export function NotificationsPage() {
         actions={
           <>
             <Tabs value={filter} onChange={(v) => { setFilter(v); setPage(1); }} tabs={[{ value: 'all', label: 'All' }, { value: 'unread', label: 'Unread' }]} />
-            <Button disabled={!meta?.unread} onClick={() => void markAll()}>Mark all read</Button>
+            <Button disabled={!meta?.unread} onClick={() => markAll()}>Mark all read</Button>
           </>
         }
       />

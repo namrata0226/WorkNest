@@ -1,6 +1,6 @@
 import { RequestHandler } from 'express';
-import { PERMISSIONS } from '../constants';
-import { can } from '../middleware/auth';
+import { PERMISSIONS, ROLES } from '../constants';
+import { can, refuseOwnRecord } from '../middleware/auth';
 import { Employee, IEmployee } from '../models/Employee';
 import { Department, Location } from '../models/Org';
 import { ctxOf, audit } from '../services/audit';
@@ -53,7 +53,9 @@ export const create: RequestHandler = async (req, res) => {
   created(res, await service.createEmployee(ctxOf(req), req.valid.body));
 };
 
+/** HR cannot change their own gender, policy, manager or dates, which decide their leave. A Super Admin is the top of the chain and may. */
 export const update: RequestHandler = async (req, res) => {
+  if (req.auth!.role !== ROLES.SUPER_ADMIN) refuseOwnRecord(req.auth!, req.valid.params.id, 'You cannot change your own employee record. Ask another administrator, or edit your name and phone under My account.');
   ok(res, await service.updateEmployee(ctxOf(req), req.valid.params.id, req.valid.body));
 };
 

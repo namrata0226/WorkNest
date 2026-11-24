@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { CalendarEvent, CalendarHoliday, LeaveCalendar, VisibleRange } from '../components/LeaveCalendar';
-import { Card, Note, PageHeader } from '../components/ui';
+import { Note } from '../components/ui';
+import { Planner } from '../components/planner/Planner';
 import { useFetch } from '../hooks/useFetch';
 
 export function MyCalendarView() {
@@ -25,11 +26,13 @@ export function MyCalendarView() {
   );
 }
 
+/** The full calendar: your own events and tasks, company-wide events, your leave and your holidays. */
 export function MyCalendarPage() {
   return (
     <>
-      <PageHeader title="My calendar" subtitle="Your approved and pending leave, with the holidays that apply to you" />
-      <Card><MyCalendarView /></Card>
+      {/* The calendar's own header names the period, so the page title is for screen readers only. */}
+      <h1 className="sr-only">Calendar</h1>
+      <Planner />
     </>
   );
 }

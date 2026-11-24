@@ -3,10 +3,11 @@ import { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { Link } from 'react-router-dom';
 import { api, applyServerErrors, errorMessage } from '../api/client';
-import { Badge, Button, Card, DataTable, Field, Input, Modal, Note, PageHeader, Pagination, Stat, StatusBadge, Textarea, useToast } from '../components/ui';
+import { Badge, Button, Card, DataTable, Field, Input, Modal, Note, PageHeader, Pagination, Stat, StatusBadge, Textarea, useConfirm, useToast } from '../components/ui';
+import { defaultPeriod, Period, PeriodPicker, periodLabel, periodParams } from '../components/PeriodPicker';
 import { useFetch } from '../hooks/useFetch';
 import type { AttendanceCorrection, AttendanceDay, AttendanceMonth, AttendanceStatus, AttendanceToday, WfhRequest } from '../types';
-import { formatDay, formatRange, todayString } from '../utils/date';
+import { days, formatDay, formatRange, todayString } from '../utils/date';
 import { CorrectionRequestForm, correctionRequestSchema, WfhForm, wfhSchema } from '../validations';
 
 const STATUS: Record<AttendanceStatus, { label: string; tone: React.ComponentProps<typeof Badge>['tone'] }> = {
@@ -30,6 +31,9 @@ export const AttendanceBadge = ({ day }: { day: Pick<AttendanceDay, 'status' | '
 export const formatWorked = (minutes: number | null) => (minutes == null ? '—' : `${Math.floor(minutes / 60)}h ${String(minutes % 60).padStart(2, '0')}m`);
 
 /** Times come from the server, in the company's timezone. */
+/** Attended days (office + work from home) as a share of the working days that have passed, or null if none have. */
+export const attendanceRate = (s: { attended: number; workingDays: number }) => (s.workingDays ? Math.round((s.attended / s.workingDays) * 100) : null);
+
 export function PunchCard({ onChange }: { onChange?: () => void }) {
   const toast = useToast();
   const { data, error, reload } = useFetch<AttendanceToday>('/attendance/my/today');
@@ -58,8 +62,8 @@ export function PunchCard({ onChange }: { onChange?: () => void }) {
           <div><dt className="text-xs text-muted">Punch out</dt><dd className="tnum mt-0.5 font-semibold" data-testid="punch-out">{data?.punchOut ?? '—'}</dd></div>
           <div><dt className="text-xs text-muted">Worked</dt><dd className="tnum mt-0.5 font-semibold">{formatWorked(data?.workedMinutes ?? null)}</dd></div>
         </dl>
-        {data && !data.punchIn && <Button variant="primary" loading={busy} onClick={() => void punch('in')}>Punch in</Button>}
-        {data?.punchIn && !data.punchOut && <Button variant="primary" loading={busy} onClick={() => void punch('out')}>Punch out</Button>}
+        {data && !data.punchIn && <Button variant="primary" loading={busy} onClick={() => punch('in')}>Punch in</Button>}
+        {data?.punchIn && !data.punchOut && <Button variant="primary" loading={busy} onClick={() => punch('out')}>Punch out</Button>}
         {data?.punchOut && <Badge tone="green">Done for today</Badge>}
       </div>
     </Card>
@@ -159,10 +163,12 @@ export function RequestCorrectionModal({ date, punchIn, punchOut, onClose, onDon
 
 function CorrectionsCard({ reloadKey }: { reloadKey: number }) {
   const toast = useToast();
+  const confirm = useConfirm();
   const { data, reload } = useFetch<AttendanceCorrection[]>('/attendance/corrections/my', { reloadKey });
-  const cancel = async (id: string) => {
+  const cancel = async (r: AttendanceCorrection) => {
+    if (!(await confirm({ title: 'Cancel this correction request?', message: `Your request to correct ${formatDay(r.date)} will be withdrawn.`, confirmLabel: 'Cancel request', cancelLabel: 'Keep request', tone: 'danger' }))) return;
     try {
-      await api.patch(`/attendance/corrections/${id}/cancel`, {});
+      await api.patch(`/attendance/corrections/${r._id}/cancel`, {});
       toast('Request cancelled');
       await reload();
     } catch (err) {
@@ -181,7 +187,7 @@ function CorrectionsCard({ reloadKey }: { reloadKey: number }) {
           { header: 'Punch out', cell: (r) => r.punchOut ?? '—', className: 'tnum' },
           { header: 'Status', cell: (r) => <StatusBadge status={r.status} /> },
           { header: 'Reason', cell: (r) => (r.rejectionReason ? `${r.reason}. Rejected: ${r.rejectionReason}` : r.reason), className: 'text-muted' },
-          { header: '', align: 'right', cell: (r) => (r.status === 'PENDING' ? <Button small onClick={() => void cancel(r._id)}>Cancel</Button> : null) },
+          { header: '', align: 'right', cell: (r) => (r.status === 'PENDING' ? <Button small onClick={() => cancel(r)}>Cancel</Button> : null) },
         ]}
       />
     </Card>
@@ -190,6 +196,7 @@ function CorrectionsCard({ reloadKey }: { reloadKey: number }) {
 
 function WfhCard({ onChange }: { onChange: () => void }) {
   const toast = useToast();
+  const confirm = useConfirm();
   const [page, setPage] = useState(1);
   const [applying, setApplying] = useState(false);
   const { data, meta, loading, error, reload } = useFetch<WfhRequest[]>('/wfh/my', { page, limit: 5 });
@@ -197,7 +204,7 @@ function WfhCard({ onChange }: { onChange: () => void }) {
   const changed = () => { void reload(); onChange(); };
 
   const cancel = async (r: WfhRequest) => {
-    if (!window.confirm(`Cancel your work from home for ${formatRange(r.startDate, r.endDate)}?`)) return;
+    if (!(await confirm({ title: 'Cancel work from home?', message: `Your work from home for ${formatRange(r.startDate, r.endDate)} will be cancelled.`, confirmLabel: 'Cancel work from home', cancelLabel: 'Keep it', tone: 'danger' }))) return;
     try {
       await api.patch(`/wfh/${r._id}/cancel`, {});
       toast('Request cancelled');
@@ -220,7 +227,7 @@ function WfhCard({ onChange }: { onChange: () => void }) {
           { header: 'Days', align: 'right', cell: (r) => r.totalDays },
           { header: 'Status', cell: (r) => <StatusBadge status={r.status} /> },
           { header: 'Reason', cell: (r) => (r.rejectionReason ? `${r.reason}. Rejected: ${r.rejectionReason}` : r.reason), className: 'text-muted' },
-          { header: '', align: 'right', cell: (r) => ((r.status === 'PENDING' || (r.status === 'APPROVED' && r.endDate >= today)) ? <Button small onClick={() => void cancel(r)}>Cancel</Button> : null) },
+          { header: '', align: 'right', cell: (r) => ((r.status === 'PENDING' || (r.status === 'APPROVED' && r.endDate >= today)) ? <Button small onClick={() => cancel(r)}>Cancel</Button> : null) },
         ]}
       />
       <Pagination meta={meta} onPage={setPage} />
@@ -230,8 +237,10 @@ function WfhCard({ onChange }: { onChange: () => void }) {
 }
 
 export function AttendancePage() {
-  const [month, setMonth] = useState(todayString().slice(0, 7));
-  const { data, loading, error, reload } = useFetch<AttendanceMonth>('/attendance/my', { month });
+  const [period, setPeriod] = useState<Period>(() => defaultPeriod());
+  const params = periodParams(period);
+  const { data, loading, error, reload } = useFetch<AttendanceMonth>(params ? '/attendance/my' : null, params ?? undefined);
+  const hint = params ? `Days in ${periodLabel(period)}` : 'Choose a period';
   const [fixing, setFixing] = useState<AttendanceDay | null>(null);
   const [corrections, setCorrections] = useState(0);
   const s = data?.summary;
@@ -241,11 +250,19 @@ export function AttendancePage() {
     <>
       <PageHeader title="Attendance" subtitle="Punch in when you start and punch out when you finish" />
       <PunchCard onChange={() => void reload()} />
-      <div className="mt-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Stat label="Present" value={s?.present ?? '—'} hint="Days this month" tone="brand" />
-        <Stat label="Work from home" value={s?.workFromHome ?? '—'} hint="Days this month" tone="brand" />
-        <Stat label="On leave" value={s?.onLeave ?? '—'} hint="Days this month" />
-        <Stat label="Absent" value={s?.absent ?? '—'} hint="Days this month" tone={s?.absent ? 'amber' : undefined} />
+      <div className="mt-4 grid grid-cols-2 gap-3 lg:grid-cols-5">
+        <div className="col-span-2 lg:col-span-1">
+          <Stat
+            label="Total attendance"
+            value={s ? days(s.attended) : '—'}
+            hint={s ? `${s.present} in office + ${s.workFromHome} from home${attendanceRate(s) != null ? ` · ${attendanceRate(s)}% of working days` : ''}` : hint}
+            tone="brand"
+          />
+        </div>
+        <Stat label="Present" value={s?.present ?? '—'} hint={hint} tone="brand" />
+        <Stat label="Work from home" value={s?.workFromHome ?? '—'} hint={hint} tone="brand" />
+        <Stat label="On leave" value={s?.onLeave ?? '—'} hint={hint} />
+        <Stat label="Absent" value={s?.absent ?? '—'} hint={hint} tone={s?.absent ? 'amber' : undefined} />
       </div>
       <WfhCard onChange={() => void reload()} />
       <CorrectionsCard reloadKey={corrections} />
@@ -253,7 +270,7 @@ export function AttendancePage() {
         className="mt-4"
         flush
         title="Daily record"
-        actions={<Input aria-label="Month" type="month" className="w-40 py-1" value={month} onChange={(e) => { if (e.target.value) setMonth(e.target.value); }} />}
+        actions={<PeriodPicker value={period} onChange={setPeriod} />}
       >
         {error && <Note>{error}</Note>}
         <AttendanceTable days={data?.days ?? null} loading={loading} actions={(d) => (canFix(d) ? <Button small onClick={() => setFixing(d)}>Fix</Button> : null)} />

@@ -3,7 +3,7 @@ import { PERMISSIONS } from '../constants';
 import { can } from '../middleware/auth';
 import { Employee, IEmployee } from '../models/Employee';
 import { AuditLog } from '../models/System';
-import { companyCalendar, employeeCalendar, monthlySummary } from '../services/calendar';
+import { companyCalendar, employeeCalendar, monthlySummary, summaryDetails } from '../services/calendar';
 import { buildReport } from '../services/report';
 import { diffDays } from '../utils/dates';
 import { badRequest, notFound } from '../utils/errors';
@@ -32,6 +32,11 @@ export const employee: RequestHandler = async (req, res) => {
   const doc = await Employee.findById(target).lean<IEmployee>();
   if (!doc) throw notFound('Employee');
   ok(res, await employeeCalendar(doc, start, end));
+};
+
+export const summaryDetail: RequestHandler = async (req, res) => {
+  const { month, kind, department, leaveType, search } = req.valid.query;
+  ok(res, await summaryDetails(month, kind, { department, leaveType, search }));
 };
 
 export const summary: RequestHandler = async (req, res) => {

@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { api, applyServerErrors, errorMessage } from '../api/client';
 import { AttachedDocument, DocumentUpload } from '../components/DocumentUpload';
-import { Badge, Button, Card, Checkbox, Empty, Field, Input, Loading, Modal, Note, PageHeader, Select, Textarea, useToast } from '../components/ui';
+import { Badge, Button, Card, Checkbox, Empty, Field, Input, Loading, Modal, Note, PageHeader, Select, Textarea, useConfirm, useToast } from '../components/ui';
 import { useAuth } from '../context/AuthContext';
 import { useFetch } from '../hooks/useFetch';
 import { downloadFile } from '../services/download';
@@ -60,6 +60,7 @@ function ReadersModal({ item, onClose }: { item: Announcement; onClose: () => vo
 export function AnnouncementsPage() {
   const { can } = useAuth();
   const toast = useToast();
+  const confirm = useConfirm();
   const manage = can('announcements:manage');
   const { data, loading, error, reload } = useFetch<Announcement[]>('/announcements');
   const [publishing, setPublishing] = useState(false);
@@ -73,6 +74,11 @@ export function AnnouncementsPage() {
     } catch (err) {
       toast(errorMessage(err), 'error');
     }
+  };
+
+  const remove = async (a: Announcement) => {
+    if (!(await confirm({ title: `Delete "${a.title}"?`, message: 'It is removed for everyone, along with who has read it. This cannot be undone.', confirmLabel: 'Delete', tone: 'danger' }))) return;
+    await run(() => api.delete(`/announcements/${a._id}`), 'Announcement deleted');
   };
 
   return (
@@ -91,14 +97,14 @@ export function AnnouncementsPage() {
               </div>
               {manage && <div className="flex gap-2">
                 {a.requiresAck && <Button small onClick={() => setReaders(a)}>Who has read</Button>}
-                <Button small onClick={() => { if (window.confirm(`Delete "${a.title}"?`)) void run(() => api.delete(`/announcements/${a._id}`), 'Deleted'); }}>Delete</Button>
+                <Button small variant="ghost" className="text-rose" onClick={() => remove(a)}>Delete</Button>
               </div>}
             </div>
             <p className="mt-3 whitespace-pre-wrap text-[13px]">{a.body}</p>
             {a.document && <button type="button" className="mt-2 text-[13px] text-brand hover:underline" onClick={() => downloadFile(`/files/${a.document!._id}`, {}, a.document!.originalName).catch((err) => toast(errorMessage(err), 'error'))}>{a.document.originalName}</button>}
             {a.requiresAck && (
               <div className="mt-3 border-t border-line pt-3">
-                {a.acknowledged ? <Badge tone="green">You confirmed this</Badge> : <Button small variant="primary" onClick={() => void run(() => api.post(`/announcements/${a._id}/acknowledge`, {}), 'Thanks for confirming')}>I have read this</Button>}
+                {a.acknowledged ? <Badge tone="green">You confirmed this</Badge> : <Button small variant="primary" onClick={() => run(() => api.post(`/announcements/${a._id}/acknowledge`, {}), 'Thanks for confirming')}>I have read this</Button>}
               </div>
             )}
           </Card>

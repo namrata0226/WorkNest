@@ -5,6 +5,7 @@ import { CompOffRequest, CompOffTransaction } from '../models/CompOff';
 import { Employee, IEmployee } from '../models/Employee';
 import { LeaveTransaction } from '../models/LeaveLedger';
 import { LeaveRequest } from '../models/LeaveRequest';
+import { refuseOwnRecord } from '../middleware/auth';
 import { ctxOf } from '../services/audit';
 import { adjustBalance, BalanceRow, getEmployeeBalances } from '../services/balance';
 import { employeeHolidays } from '../services/holiday';
@@ -56,6 +57,7 @@ export const employeeTransactions: RequestHandler = async (req, res) => {
 };
 
 export const adjustment: RequestHandler = async (req, res) => {
+  refuseOwnRecord(req.auth!, req.valid.body.employee, 'You cannot adjust your own leave balance. Ask another administrator.');
   // Without a client key each call is its own adjustment. With one, retries post once.
   const idempotencyKey = req.get('Idempotency-Key') ?? randomUUID();
   created(res, await adjustBalance(ctxOf(req), { ...req.valid.body, idempotencyKey }));

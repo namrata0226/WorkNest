@@ -128,6 +128,23 @@ describe('monthly attendance export', () => {
     expect(row.getCell(headers.indexOf('01')).value).toBe('A');
   });
 
+  it('exports any range of dates, naming days across months', async () => {
+    const res = await hrAgent.get('/api/attendance/export').query({ from: '2030-02-27', to: '2030-03-04' }).buffer(true).parse((r, done) => {
+      const chunks: Buffer[] = [];
+      r.on('data', (c: Buffer) => chunks.push(c));
+      r.on('end', () => done(null, Buffer.concat(chunks)));
+    });
+    expect(res.status).toBe(200);
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(res.body);
+    const headers = (wb.worksheets[0].getRow(1).values as string[]).filter(Boolean);
+    expect(headers.slice(-6)).toEqual(['27/02', '28/02', '01/03', '02/03', '03/03', '04/03']);
+  });
+
+  it('needs a month or a range to export', async () => {
+    expect((await hrAgent.get('/api/attendance/export')).status).toBe(400);
+  });
+
   it('is only for those with the permission', async () => {
     expect((await empAgent.get('/api/attendance/export').query({ month: '2030-03' })).status).toBe(403);
     expect((await managerAgent.get('/api/attendance/export').query({ month: '2030-03' })).status).toBe(403);

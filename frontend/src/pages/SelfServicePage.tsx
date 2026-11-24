@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react';
 import { api, errorMessage } from '../api/client';
-import { Badge, Button, Card, Empty, Field, Input, Modal, Note, Textarea, useToast } from '../components/ui';
+import { Badge, Button, Card, Empty, Field, Input, Modal, Note, Textarea, useConfirm, useToast } from '../components/ui';
 import { useFetch } from '../hooks/useFetch';
 import { downloadFile } from '../services/download';
 import type { Checklist, EmployeeDetails, PersonalDocument } from '../types';
@@ -38,7 +38,7 @@ function DetailsModal({ details, onClose, onDone }: { details: EmployeeDetails; 
   };
 
   return (
-    <Modal wide title="Update my details" onClose={onClose} footer={<><Button onClick={onClose}>Cancel</Button><Button variant="primary" loading={busy} onClick={() => void save()}>Save details</Button></>}>
+    <Modal wide title="Update my details" onClose={onClose} footer={<><Button onClick={onClose}>Cancel</Button><Button variant="primary" loading={busy} onClick={() => save()}>Save details</Button></>}>
       <div className="space-y-4">
         {error && <Note>{error}</Note>}
         <section>
@@ -84,6 +84,7 @@ export function DetailRows({ details }: { details: Partial<EmployeeDetails> }) {
 
 function DocumentsCard() {
   const toast = useToast();
+  const confirm = useConfirm();
   const { data, reload } = useFetch<PersonalDocument[]>('/me/documents');
   const fileRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
@@ -104,9 +105,10 @@ function DocumentsCard() {
     }
   };
   const remove = async (d: PersonalDocument) => {
-    if (!window.confirm(`Delete ${d.originalName}?`)) return;
+    if (!(await confirm({ title: 'Delete this document?', message: `${d.originalName} will be permanently deleted. HR will no longer be able to open it.`, confirmLabel: 'Delete', tone: 'danger' }))) return;
     try {
       await api.delete(`/me/documents/${d._id}`);
+      toast('Document deleted');
       await reload();
     } catch (err) {
       toast(errorMessage(err), 'error');
@@ -119,7 +121,7 @@ function DocumentsCard() {
           {data.map((d) => (
             <li key={d._id} className="flex items-center justify-between gap-3 py-2">
               <button type="button" className="min-w-0 truncate text-left text-brand hover:underline" onClick={() => downloadFile(`/files/${d._id}`, {}, d.originalName).catch((err) => toast(errorMessage(err), 'error'))}>{d.originalName}</button>
-              <Button small onClick={() => void remove(d)}>Delete</Button>
+              <Button small variant="ghost" className="text-rose" onClick={() => remove(d)}>Delete</Button>
             </li>
           ))}
         </ul>

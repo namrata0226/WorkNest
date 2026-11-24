@@ -51,8 +51,8 @@ export function EmailActionPage() {
               {decision === 'reject' && <Field label="Reason" required hint="The employee will see this"><Textarea value={reason} onChange={(e) => setReason(e.target.value)} /></Field>}
               <div className="flex gap-2">
                 {decision === 'approve'
-                  ? <><Button variant="primary" loading={busy} onClick={() => void submit()}>Confirm approval</Button><Button onClick={() => setDecision('reject')}>Reject instead</Button></>
-                  : <><Button variant="danger" loading={busy} disabled={!reason.trim()} onClick={() => void submit()}>Confirm rejection</Button><Button onClick={() => setDecision('approve')}>Approve instead</Button></>}
+                  ? <><Button variant="primary" loading={busy} onClick={() => submit()}>Confirm approval</Button><Button onClick={() => setDecision('reject')}>Reject instead</Button></>
+                  : <><Button variant="danger" loading={busy} disabled={!reason.trim()} onClick={() => submit()}>Confirm rejection</Button><Button onClick={() => setDecision('approve')}>Approve instead</Button></>}
               </div>
             </>
           )}

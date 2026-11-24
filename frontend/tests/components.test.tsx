@@ -1,11 +1,15 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { api } from '../src/api/client';
 import { CalendarEvent, CalendarHoliday, LeaveCalendar, toFullCalendarEvents, VisibleRange } from '../src/components/LeaveCalendar';
-import { DataTable, Modal, Pagination, StatusBadge, ToastProvider } from '../src/components/ui';
+import { Button, DataTable, Modal, Pagination, StatusBadge, ToastProvider, useConfirm, useToast } from '../src/components/ui';
+import { ApprovalsPage } from '../src/pages/ApprovalsPage';
+import { ItemModal } from '../src/components/planner/ItemModal';
+import { ExpensesPage } from '../src/pages/ExpensesPage';
+import { expenseSchema } from '../src/validations';
 import { AuthProvider } from '../src/context/AuthContext';
 import { EmployeeFormModal } from '../src/pages/admin/EmployeesPage';
 import { ApplyLeavePage } from '../src/pages/ApplyLeavePage';
@@ -70,11 +74,12 @@ describe('opening a link from an email', () => {
   const app = (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
+      <Route path="/" element={<RequireAuth><ShowLocation /></RequireAuth>} />
       <Route path="/approvals" element={<RequireAuth><ShowLocation /></RequireAuth>} />
     </Routes>
   );
 
-  it('asks a signed-out person to sign in, then opens the exact request', async () => {
+  it('asks a signed-out person to sign in, then goes to the home screen', async () => {
     mockApi({}, null);
     vi.spyOn(api, 'post').mockResolvedValue({ data: { data: asEmployee } });
     renderApp(app, '/approvals?request=abc123');
@@ -82,7 +87,7 @@ describe('opening a link from an email', () => {
     await user.type(await screen.findByLabelText(/Email/), 's@x.co');
     await user.type(screen.getByLabelText(/Password/), 'secret-pass-1');
     await user.click(screen.getByRole('button', { name: /sign in/i }));
-    expect(await screen.findByTestId('location')).toHaveTextContent('/approvals?request=abc123');
+    expect(await screen.findByTestId('location')).toHaveTextContent(/^\/$/);
   });
 
   it('opens the request directly when already signed in', async () => {
@@ -330,6 +335,9 @@ describe('profile photo', () => {
     const user = userEvent.setup();
     renderApp(<AccountPage />);
     await user.click(await screen.findByRole('button', { name: 'Remove photo' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Remove your profile photo?' });
+    expect(del).not.toHaveBeenCalled();
+    await user.click(within(dialog).getByRole('button', { name: 'Remove photo' }));
     await waitFor(() => expect(del).toHaveBeenCalledWith('/me/avatar'));
     await screen.findByRole('button', { name: 'Add photo' });
     expect(screen.queryByRole('img', { name: /profile photo/ })).not.toBeInTheDocument();
@@ -651,5 +659,189 @@ describe('shared components', () => {
   it('gives each status a readable label', () => {
     render(<StatusBadge status="CANCELLATION_REQUESTED" />);
     expect(screen.getByText('Cancellation requested')).toBeInTheDocument();
+  });
+});
+
+describe('buttons that start work', () => {
+  it('runs an action once while it is still in progress', async () => {
+    let finish!: () => void;
+    const onClick = vi.fn(() => new Promise<void>((resolve) => { finish = resolve; }));
+    render(<Button onClick={onClick}>Save</Button>);
+    const button = screen.getByRole('button', { name: 'Save' });
+    fireEvent.click(button);
+    fireEvent.click(button);
+    fireEvent.click(button, { detail: 2 });
+    expect(onClick).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(button).toBeDisabled());
+    await act(async () => finish());
+    await waitFor(() => expect(button).toBeEnabled());
+    fireEvent.click(button);
+    expect(onClick).toHaveBeenCalledTimes(2);
+  });
+
+  it('ignores the second click of a double-click', () => {
+    const onClick = vi.fn();
+    render(<Button onClick={onClick}>Go</Button>);
+    const button = screen.getByRole('button', { name: 'Go' });
+    fireEvent.click(button, { detail: 1 });
+    fireEvent.click(button, { detail: 2 });
+    expect(onClick).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('confirmation dialog', () => {
+  function Harness({ onResult }: { onResult: (ok: boolean) => void }) {
+    const confirm = useConfirm();
+    return <Button onClick={async () => onResult(await confirm({ title: 'Delete holiday?', confirmLabel: 'Delete', tone: 'danger' }))}>Open</Button>;
+  }
+
+  it.each([
+    ['confirming', 'Delete', true],
+    ['cancelling', 'Cancel', false],
+  ])('resolves when %s', async (_name, press, expected) => {
+    const onResult = vi.fn();
+    const user = userEvent.setup();
+    render(<ToastProvider><Harness onResult={onResult} /></ToastProvider>);
+    await user.click(screen.getByRole('button', { name: 'Open' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Delete holiday?' });
+    await user.click(within(dialog).getByRole('button', { name: press }));
+    await waitFor(() => expect(onResult).toHaveBeenCalledWith(expected));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it('closes only the top dialog on Escape', async () => {
+    const onResult = vi.fn();
+    const outerClose = vi.fn();
+    const user = userEvent.setup();
+    render(<ToastProvider><Modal title="Outer" onClose={outerClose}><Harness onResult={onResult} /></Modal></ToastProvider>);
+    await user.click(screen.getByRole('button', { name: 'Open' }));
+    await screen.findByRole('dialog', { name: 'Delete holiday?' });
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(onResult).toHaveBeenCalledWith(false));
+    expect(outerClose).not.toHaveBeenCalled();
+  });
+});
+
+describe('toasts', () => {
+  it('shows a dismissible message', async () => {
+    function Trigger() {
+      const toast = useToast();
+      return <button type="button" onClick={() => toast('Saved')}>Toast</button>;
+    }
+    const user = userEvent.setup();
+    render(<ToastProvider><Trigger /></ToastProvider>);
+    await user.click(screen.getByRole('button', { name: 'Toast' }));
+    const message = await screen.findByRole('status');
+    expect(message).toHaveTextContent('Saved');
+    await user.click(within(message).getByRole('button', { name: 'Dismiss' }));
+    expect(screen.queryByText('Saved')).not.toBeInTheDocument();
+  });
+});
+
+describe('approvals', () => {
+  const wfh = (status: string) => ({ _id: `w-${status}`, employee: { _id: 'e2', fullName: 'Ravi Rao', employeeId: 'EMP9' }, startDate: '2030-03-05', endDate: '2030-03-05', totalDays: 1, reason: 'Plumber', status, decidedByName: status === 'PENDING' ? null : 'Asha HR', rejectionReason: null });
+
+  it('keeps decided requests in the list and shows their outcome instead of buttons', async () => {
+    const get = vi.spyOn(api, 'get').mockImplementation(async (url: string, config?: { params?: unknown }) => {
+      if (url === '/auth/me') return { data: { data: asEmployee } };
+      if (url === '/wfh/pending') return { data: { data: (config?.params as { view?: string } | undefined)?.view === 'PENDING' ? [wfh('PENDING')] : [wfh('PENDING'), wfh('APPROVED'), wfh('REJECTED')] } };
+      return { data: { data: [] } };
+    });
+    renderApp(<Routes><Route path="/approvals" element={<ApprovalsPage />} /></Routes>, '/approvals');
+    const table = await screen.findByRole('table');
+    expect(await within(table).findByText('Approved')).toBeInTheDocument();
+    expect(within(table).getByText('Rejected')).toBeInTheDocument();
+    expect(within(table).getAllByRole('button', { name: 'Approve' })).toHaveLength(1);
+    expect(screen.getAllByText('by Asha HR')).toHaveLength(2);
+    expect(get).toHaveBeenCalledWith('/wfh/pending', { params: { view: 'ALL' } });
+
+    expect(screen.queryByRole('tab')).not.toBeInTheDocument();
+  });
+});
+
+describe('expense claims', () => {
+  it('explains each limit in plain words', () => {
+    const base = { category: 'TRAVEL' as const, expenseDate: '2030-03-05', description: 'Taxi' };
+    const message = (v: object) => expenseSchema.safeParse({ ...base, ...v }).error?.issues[0]?.message;
+    expect(message({ amount: 10_000_001 })).toBe('The amount cannot be more than ₹1,00,00,000');
+    expect(message({ amount: 12.345 })).toBe('Use at most two decimal places');
+    expect(message({ amount: 0 })).toBe('Enter an amount above zero');
+    expect(message({ amount: 10, description: 'x'.repeat(1001) })).toBe('The description must be 1,000 characters or fewer');
+  });
+
+  it('shows the limit message as soon as it is passed', async () => {
+    mockApi({});
+    const user = userEvent.setup();
+    renderApp(<ExpensesPage />);
+    await user.click(await screen.findByRole('button', { name: 'New claim' }));
+    await user.type(screen.getByLabelText(/Amount/), '20000000');
+    expect(await screen.findByText('The amount cannot be more than ₹1,00,00,000')).toBeInTheDocument();
+  });
+
+  it('asks before cancelling a claim', async () => {
+    const claim = { _id: 'x1', category: 'TRAVEL', expenseDate: '2030-03-05', amount: 250, description: 'Taxi', status: 'PENDING', receipt: null, rejectionReason: null };
+    mockApi({ '/expenses/my': [claim] });
+    const patch = vi.spyOn(api, 'patch').mockResolvedValue({ data: { data: {} } });
+    const user = userEvent.setup();
+    renderApp(<ExpensesPage />);
+    await user.click(await screen.findByRole('button', { name: 'Cancel' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Cancel this claim?' });
+    await user.click(within(dialog).getByRole('button', { name: 'Keep claim' }));
+    expect(patch).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    await user.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Cancel claim' }));
+    await waitFor(() => expect(patch).toHaveBeenCalledWith('/expenses/x1/cancel', {}));
+  });
+});
+
+describe('password fields', () => {
+  it('shows and hides the password with the eye button', async () => {
+    mockApi({}, null);
+    const user = userEvent.setup();
+    renderApp(<LoginPage />);
+    const field = await screen.findByLabelText('Password');
+    await user.type(field, 'secret-pass-1');
+    expect(field).toHaveAttribute('type', 'password');
+    await user.click(screen.getByRole('button', { name: 'Show password' }));
+    expect(field).toHaveAttribute('type', 'text');
+    expect(field).toHaveValue('secret-pass-1');
+    await user.click(screen.getByRole('button', { name: 'Hide password' }));
+    expect(field).toHaveAttribute('type', 'password');
+  });
+});
+
+describe('adding to the calendar', () => {
+  it('adds an event with its times and reminder', async () => {
+    mockApi({});
+    const post = vi.spyOn(api, 'post').mockResolvedValue({ data: { data: { _id: 'n1', date: '2030-03-05' } } });
+    const onSaved = vi.fn();
+    const user = userEvent.setup();
+    renderApp(<ItemModal draft={{ kind: 'EVENT', date: '2030-03-05', startTime: '13:30', endTime: '14:30' }} onClose={() => undefined} onSaved={onSaved} />);
+    await user.type(await screen.findByLabelText(/Title/), 'Design sync');
+    await user.selectOptions(screen.getByLabelText(/^Reminder/), '10');
+    await user.click(screen.getByRole('button', { name: 'Add event' }));
+    await waitFor(() => expect(post).toHaveBeenCalledWith('/calendar/items', expect.objectContaining({ kind: 'EVENT', title: 'Design sync', date: '2030-03-05', startTime: '13:30', endTime: '14:30', allDay: false, reminderMinutes: 10, visibility: 'PRIVATE' })));
+    expect(onSaved).toHaveBeenCalled();
+  });
+
+  it('says what is wrong with the times before saving', async () => {
+    mockApi({});
+    const post = vi.spyOn(api, 'post').mockClear();
+    const user = userEvent.setup();
+    renderApp(<ItemModal draft={{ kind: 'EVENT', date: '2030-03-05', startTime: '15:00', endTime: '14:00' }} onClose={() => undefined} onSaved={() => undefined} />);
+    await user.type(await screen.findByLabelText(/Title/), 'Retro');
+    await user.click(screen.getByRole('button', { name: 'Add event' }));
+    expect(await screen.findByText('The end time must be after the start time')).toBeInTheDocument();
+    expect(post).not.toHaveBeenCalled();
+  });
+
+  it('adds a task with no due time as all day', async () => {
+    mockApi({});
+    const post = vi.spyOn(api, 'post').mockResolvedValue({ data: { data: { _id: 't1', date: '2030-03-05' } } });
+    const user = userEvent.setup();
+    renderApp(<ItemModal draft={{ kind: 'TASK', date: '2030-03-05', allDay: true }} onClose={() => undefined} onSaved={() => undefined} />);
+    await user.type(await screen.findByLabelText(/Title/), 'Submit receipts');
+    await user.click(screen.getByRole('button', { name: 'Add task' }));
+    await waitFor(() => expect(post).toHaveBeenCalledWith('/calendar/items', expect.objectContaining({ kind: 'TASK', allDay: true, startTime: null, endTime: null, reminderMinutes: null })));
   });
 });
