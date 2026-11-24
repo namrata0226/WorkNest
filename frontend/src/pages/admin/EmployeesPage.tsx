@@ -4,9 +4,10 @@ import { useForm } from 'react-hook-form';
 import { useNavigate } from 'react-router-dom';
 import { api, applyServerErrors, errorMessage } from '../../api/client';
 import { PersonAvatar } from '../../components/Avatar';
-import { Button, Card, DataTable, Field, Input, Loading, Modal, Note, PageHeader, Pagination, Select, StatusBadge, useToast } from '../../components/ui';
+import { Button, Card, DataTable, Field, InfiniteLoader, Input, Loading, Modal, Note, PageHeader, Select, StatusBadge, useToast } from '../../components/ui';
 import { useAuth } from '../../context/AuthContext';
 import { useFetch } from '../../hooks/useFetch';
+import { useInfiniteFetch } from '../../hooks/useInfiniteFetch';
 import { uploadImport } from '../../services/download';
 import type { ApiFieldError, Employee, Named } from '../../types';
 import { formatDate } from '../../utils/date';
@@ -21,16 +22,15 @@ export function EmployeesPage() {
   const [department, setDepartment] = useState('');
   const [location, setLocation] = useState('');
   const [status, setStatus] = useState('');
-  const [page, setPage] = useState(1);
   const [creating, setCreating] = useState(false);
   const [activation, setActivation] = useState<{ email: string; link: string }[] | null>(null);
   const [importResult, setImportResult] = useState<{ total: number; created: number; errors: ApiFieldError[] } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  const { data, meta, loading, error, reload } = useFetch<Employee[]>('/employees', { search, department, location, status, page, limit: 25, sort: 'fullName', order: 'asc' });
+  const list = useInfiniteFetch<Employee[]>('/employees', { search, department, location, status, sort: 'fullName', order: 'asc' }, { limit: 25 });
+  const { data, meta, loading, error, reload } = list;
   const departments = useFetch<Named[]>('/departments');
   const locations = useFetch<Named[]>('/locations');
-  const reset = () => setPage(1);
 
   const onImport = async (file?: File) => {
     if (!file) return;
@@ -60,16 +60,16 @@ export function EmployeesPage() {
         )}
       />
       <div className="mb-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-        <Input aria-label="Search" placeholder="Search name, ID or email" value={search} onChange={(e) => { setSearch(e.target.value); reset(); }} />
-        <Select aria-label="Department" value={department} onChange={(e) => { setDepartment(e.target.value); reset(); }}>
-          <option value="">All departments</option>
+        <Input aria-label="Search" placeholder="Search name, ID or email" value={search} onChange={(e) => setSearch(e.target.value)} />
+        <Select aria-label="Team" value={department} onChange={(e) => setDepartment(e.target.value)}>
+          <option value="">All teams</option>
           {departments.data?.map((d) => <option key={d._id} value={d._id}>{d.name}</option>)}
         </Select>
-        <Select aria-label="Location" value={location} onChange={(e) => { setLocation(e.target.value); reset(); }}>
+        <Select aria-label="Location" value={location} onChange={(e) => setLocation(e.target.value)}>
           <option value="">All locations</option>
           {locations.data?.map((l) => <option key={l._id} value={l._id}>{l.name}</option>)}
         </Select>
-        <Select aria-label="Status" value={status} onChange={(e) => { setStatus(e.target.value); reset(); }}>
+        <Select aria-label="Status" value={status} onChange={(e) => setStatus(e.target.value)}>
           <option value="">Any status</option>
           <option value="ACTIVE">Active</option>
           <option value="ON_NOTICE">On notice</option>
@@ -88,7 +88,7 @@ export function EmployeesPage() {
               </ul>
             )}
           </Note>
-          <p className="text-xs text-muted">Columns: Employee ID, Full Name, Email, Joining Date, Gender, Phone, Department, Designation, Reporting Manager (employee ID), Location, Category, Leave Policy.</p>
+          <p className="text-xs text-muted">Columns: Employee ID, Full Name, Email, Joining Date, Gender, Phone, Team, Designation, Reporting Manager (employee ID), Location, Category, Leave Policy.</p>
         </div>
       )}
 
@@ -104,14 +104,14 @@ export function EmployeesPage() {
             { header: 'Name', cell: (e) => <div className="flex items-center gap-2.5"><PersonAvatar person={e} /><div><div className="font-medium">{e.fullName}</div><div className="text-xs text-muted">{e.email}</div></div></div> },
             { header: 'ID', cell: (e) => e.employeeId, className: 'text-muted' },
             { header: 'Gender', cell: (e) => (e.gender ? titleCase(e.gender) : 'Not recorded'), className: 'text-muted' },
-            { header: 'Department', cell: (e) => e.department?.name ?? '—' },
+            { header: 'Team', cell: (e) => e.department?.name ?? '—' },
             { header: 'Designation', cell: (e) => e.designation ?? '—', className: 'text-muted' },
             { header: 'Location', cell: (e) => e.location?.name ?? '—', className: 'text-muted' },
             { header: 'Joined', cell: (e) => formatDate(e.joiningDate), className: 'whitespace-nowrap text-muted' },
             { header: 'Status', cell: (e) => <StatusBadge status={e.employmentStatus} /> },
           ]}
         />
-        <Pagination meta={meta} onPage={setPage} />
+        <InfiniteLoader list={list} />
       </Card>
 
       {creating && (
@@ -205,7 +205,7 @@ export function EmployeeFormModal({ employee, onClose, onSaved }: { employee?: E
         <Field label="Gender" hint="Decides access to maternity, paternity and menstrual leave" error={errors.gender?.message}>
           <Select {...register('gender')}><option value="">Not recorded</option>{EMPLOYEE_GENDERS.map((g) => <option key={g} value={g}>{titleCase(g)}</option>)}</Select>
         </Field>
-        <Field label="Department" error={errors.department?.message}>
+        <Field label="Team" error={errors.department?.message}>
           <Select {...register('department')}><option value="">None</option>{departments.data?.map((d) => <option key={d._id} value={d._id}>{d.name}</option>)}</Select>
         </Field>
         <Field label="Designation" error={errors.designation?.message}><Input {...register('designation')} /></Field>
@@ -223,7 +223,7 @@ export function EmployeeFormModal({ employee, onClose, onSaved }: { employee?: E
           <Select {...register('category')}>{EMPLOYEE_CATEGORIES.map((c) => <option key={c} value={c}>{titleCase(c)}</option>)}</Select>
         </Field>
         {showPolicies && (
-          <Field label="Assigned leave policy" hint="Blank means the best match for this person's department and location" error={errors.leavePolicy?.message}>
+          <Field label="Assigned leave policy" hint="Blank means the best match for this person's team and location" error={errors.leavePolicy?.message}>
             <Select {...register('leavePolicy')}><option value="">Automatic</option>{policies.data?.map((p) => <option key={p._id} value={p._id}>{p.name}</option>)}</Select>
           </Field>
         )}

@@ -3,10 +3,11 @@ import { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { api, applyServerErrors, errorMessage } from '../../api/client';
 import { PersonAvatar } from '../../components/Avatar';
-import { Button, Card, DataTable, Field, Input, Modal, Note, PageHeader, Pagination, Select, Stat, Textarea, useToast } from '../../components/ui';
+import { Button, Card, DataTable, Field, InfiniteLoader, Input, Modal, Note, PageHeader, Select, Stat, Textarea, useToast } from '../../components/ui';
 import { useAuth } from '../../context/AuthContext';
 import { monthPeriod, Period, PeriodPicker, periodLabel, periodParams } from '../../components/PeriodPicker';
 import { useFetch } from '../../hooks/useFetch';
+import { useInfiniteFetch } from '../../hooks/useInfiniteFetch';
 import type { AttendanceDay, AttendanceMonth, AttendanceSummary, Named } from '../../types';
 import { downloadFile } from '../../services/download';
 import { formatDay, todayString } from '../../utils/date';
@@ -77,7 +78,7 @@ function EmployeePeriodModal({ who, base, initial, canCorrect, onClose, onChange
   );
 }
 
-/** Download everyone's attendance (or one department's) for any period, as Excel or CSV. */
+/** Download everyone's attendance (or one team's) for any period, as Excel or CSV. */
 function ExportModal({ initial, department, departmentName, onClose }: { initial: Period; department: string; departmentName?: string; onClose: () => void }) {
   const toast = useToast();
   const [period, setPeriod] = useState<Period>(initial);
@@ -108,7 +109,7 @@ function ExportModal({ initial, department, departmentName, onClose }: { initial
           </Select>
         </Field>
         <p className="text-[13px] text-muted">
-          {departmentName ? `${departmentName} only` : 'All departments'}{params ? `, ${periodLabel(period)}` : ''}. One row per person, with totals and a column for each day.
+          {departmentName ? `${departmentName} only` : 'All teams'}{params ? `, ${periodLabel(period)}` : ''}. One row per person, with totals and a column for each day.
         </p>
       </div>
     </Modal>
@@ -121,11 +122,11 @@ function AttendanceBoard({ title, subtitle, dailyUrl, monthBase, manage }: { tit
   const [date, setDate] = useState(todayString());
   const [department, setDepartment] = useState('');
   const [search, setSearch] = useState('');
-  const [page, setPage] = useState(1);
   const [viewing, setViewing] = useState<Who | null>(null);
   const [correcting, setCorrecting] = useState<Row | null>(null);
   const departments = useFetch<Named[]>(manage ? '/departments' : null);
-  const { data, meta, loading, error, reload } = useFetch<Daily>(dailyUrl, { date, ...(manage ? { department } : {}), search, page, limit: 25 });
+  const list = useInfiniteFetch<Daily>(dailyUrl, { date, ...(manage ? { department } : {}), search }, { limit: 25, rowsKey: 'rows' });
+  const { data, meta, loading, error, reload } = list;
   const s = data?.summary;
   const isSelf = (id: string) => user?.employee?._id === id;
   const [exporting, setExporting] = useState(false);
@@ -134,14 +135,14 @@ function AttendanceBoard({ title, subtitle, dailyUrl, monthBase, manage }: { tit
     <>
       <PageHeader title={title} subtitle={subtitle} actions={manage && <Button onClick={() => setExporting(true)}>Export attendance</Button>} />
       <div className={`mb-3 grid gap-2 ${manage ? 'sm:grid-cols-3' : 'sm:grid-cols-2'}`}>
-        <Input aria-label="Date" type="date" max={data?.today} value={date} onChange={(e) => { if (e.target.value) { setDate(e.target.value); setPage(1); } }} />
+        <Input aria-label="Date" type="date" max={data?.today} value={date} onChange={(e) => { if (e.target.value) { setDate(e.target.value); } }} />
         {manage && (
-          <Select aria-label="Department" value={department} onChange={(e) => { setDepartment(e.target.value); setPage(1); }}>
-            <option value="">All departments</option>
+          <Select aria-label="Team" value={department} onChange={(e) => { setDepartment(e.target.value); }}>
+            <option value="">All teams</option>
             {departments.data?.map((d) => <option key={d._id} value={d._id}>{d.name}</option>)}
           </Select>
         )}
-        <Input aria-label="Search" placeholder="Search name or ID" value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }} />
+        <Input aria-label="Search" placeholder="Search name or ID" value={search} onChange={(e) => { setSearch(e.target.value); }} />
       </div>
       <div className="mb-3 grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
         <Stat label="Total attendance" value={s?.attended ?? '—'} hint="In office + work from home" tone="brand" />
@@ -160,7 +161,7 @@ function AttendanceBoard({ title, subtitle, dailyUrl, monthBase, manage }: { tit
           onRowClick={(r) => setViewing(r.employee)}
           empty={manage ? 'No employees match.' : 'Nobody reports to you, or no one matches.'}
           columns={[
-            { header: 'Employee', cell: (r) => <div className="flex items-center gap-2.5"><PersonAvatar person={r.employee} /><div><div className="font-medium">{r.employee.fullName}</div><div className="text-xs text-muted">{r.employee.employeeId} · {r.employee.department ?? 'No department'}</div></div></div> },
+            { header: 'Employee', cell: (r) => <div className="flex items-center gap-2.5"><PersonAvatar person={r.employee} /><div><div className="font-medium">{r.employee.fullName}</div><div className="text-xs text-muted">{r.employee.employeeId} · {r.employee.department ?? 'No team'}</div></div></div> },
             { header: 'Status', cell: (r) => <AttendanceBadge day={r} /> },
             { header: 'Punch in', cell: (r) => r.punchIn ?? '—', className: 'tnum' },
             { header: 'Punch out', cell: (r) => r.punchOut ?? (r.punchIn ? 'Not recorded' : '—'), className: 'tnum' },
@@ -168,7 +169,7 @@ function AttendanceBoard({ title, subtitle, dailyUrl, monthBase, manage }: { tit
             ...(manage ? [{ header: '', align: 'right' as const, cell: (r: Row) => (isSelf(r.employee._id) ? null : <Button small onClick={(e) => { e.stopPropagation(); setCorrecting(r); }}>Correct</Button>) }] : []),
           ]}
         />
-        <Pagination meta={meta} onPage={setPage} />
+        <InfiniteLoader list={list} />
       </Card>
       {viewing && <EmployeePeriodModal who={viewing} base={monthBase} initial={monthPeriod(date.slice(0, 7))} canCorrect={manage && !isSelf(viewing._id)} onClose={() => setViewing(null)} onChanged={() => void reload()} />}
       {exporting && <ExportModal initial={monthPeriod(date.slice(0, 7))} department={department} departmentName={departments.data?.find((d) => d._id === department)?.name} onClose={() => setExporting(false)} />}

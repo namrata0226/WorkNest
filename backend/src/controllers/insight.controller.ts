@@ -54,7 +54,7 @@ export const exportCalendar: RequestHandler = async (req, res) => {
     columns: [
       { key: 'employeeName', header: 'Employee Name' },
       { key: 'employeeId', header: 'Employee ID' },
-      { key: 'department', header: 'Department' },
+      { key: 'department', header: 'Team' },
       { key: 'casual', header: 'Casual Leave' },
       { key: 'sick', header: 'Sick Leave' },
       { key: 'earned', header: 'Earned Leave' },

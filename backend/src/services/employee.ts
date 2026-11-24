@@ -181,8 +181,10 @@ export async function importEmployees(ctx: RequestContext, rows: Record<string, 
     const gender = (text('gender').toUpperCase() || null) as IEmployee['gender'];
     if (gender && !EMPLOYEE_GENDERS.includes(gender)) { fail(`Unknown gender "${text('gender')}"`); continue; }
 
-    const department = text('department') ? deptIds.get(text('department').toLowerCase()) : null;
-    if (text('department') && !department) { fail(`Unknown department "${text('department')}"`); continue; }
+    // "Team" is the name people see; a "Department" column from an older file still works.
+    const teamName = text('team') || text('department');
+    const department = teamName ? deptIds.get(teamName.toLowerCase()) : null;
+    if (teamName && !department) { fail(`Unknown team "${teamName}"`); continue; }
     const location = text('location') ? locIds.get(text('location').toLowerCase()) : null;
     if (text('location') && !location) { fail(`Unknown location "${text('location')}"`); continue; }
     const leavePolicy = text('leavepolicy') ? policyIds.get(text('leavepolicy').toLowerCase()) : null;

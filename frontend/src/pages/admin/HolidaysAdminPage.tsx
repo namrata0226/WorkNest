@@ -104,7 +104,7 @@ export function HolidaysAdminPage() {
             Imported {importResult.created} of {importResult.total} rows.
             {importResult.errors.length > 0 && <ul className="mt-1 list-inside list-disc">{importResult.errors.slice(0, 15).map((e, i) => <li key={i}>{e.path}: {e.message}</li>)}</ul>}
           </Note>
-          <p className="text-xs text-muted">Columns: Name, Date, Category, Description, Location, Department, Employee Group, Half Day, Recurring.</p>
+          <p className="text-xs text-muted">Columns: Name, Date, Category, Description, Location, Team, Employee Group, Half Day, Recurring.</p>
         </div>
       )}
       {error && <Note>{error}</Note>}
@@ -226,7 +226,7 @@ function HolidayFormModal({ holiday, year, locations, departments, onClose, onDo
         <Field label="Applicable locations">
           <Controller control={control} name="locations" render={({ field }) => <CheckboxGroup value={field.value} onChange={field.onChange} options={locations.map((l) => ({ value: l._id, label: l.name }))} />} />
         </Field>
-        <Field label="Applicable departments">
+        <Field label="Applicable teams">
           <Controller control={control} name="departments" render={({ field }) => <CheckboxGroup value={field.value} onChange={field.onChange} options={departments.map((d) => ({ value: d._id, label: d.name }))} />} />
         </Field>
         <div className="sm:col-span-2">

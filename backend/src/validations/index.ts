@@ -40,6 +40,7 @@ export const employeeCreateBody = z.strictObject({
 });
 export const employeeUpdateBody = z.strictObject(employeeFields).partial();
 /* What people may change about themselves. Gender decides leave entitlement and email is the login, so both stay with HR. */
+/** What any employee may change about themselves. Everything else (gender, email, team, manager…) goes through HR. */
 export const employeeProfileBody = z.strictObject({ fullName: employeeFields.fullName, phone: employeeFields.phone });
 export const employeeStatusBody = z.strictObject({ status: z.enum(EMPLOYMENT_STATUS) });
 export const employeeListQuery = z.object({

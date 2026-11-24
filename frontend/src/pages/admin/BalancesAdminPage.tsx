@@ -3,8 +3,9 @@ import { useRef, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { useNavigate } from 'react-router-dom';
 import { api, applyServerErrors } from '../../api/client';
-import { Button, Card, DataTable, Field, Input, Modal, Note, PageHeader, Pagination, Select, Textarea, useToast } from '../../components/ui';
+import { Button, Card, DataTable, Field, InfiniteLoader, Input, Modal, Note, PageHeader, Select, Textarea, useToast } from '../../components/ui';
 import { useFetch } from '../../hooks/useFetch';
+import { useInfiniteFetch } from '../../hooks/useInfiniteFetch';
 import type { LeaveType, LeaveTypeRef, Named } from '../../types';
 import { currentYear } from '../../utils/date';
 import { AdjustmentForm, adjustmentSchema } from '../../validations';
@@ -23,17 +24,17 @@ export function BalancesAdminPage() {
   const [year, setYear] = useState(currentYear());
   const [search, setSearch] = useState('');
   const [department, setDepartment] = useState('');
-  const [page, setPage] = useState(1);
   const departments = useFetch<Named[]>('/departments');
-  const { data, meta, loading, error } = useFetch<OverviewRow[]>('/leave-balances', { year, search, department, page, limit: 25, sort: 'fullName', order: 'asc' });
+  const list = useInfiniteFetch<OverviewRow[]>('/leave-balances', { year, search, department, sort: 'fullName', order: 'asc' }, { limit: 25 });
+  const { data, meta, loading, error } = list;
 
   return (
     <>
       <PageHeader title="Leave balances" subtitle="Available days by employee. Open someone to see the full ledger or adjust a balance." />
       <div className="mb-3 grid gap-2 sm:grid-cols-3">
-        <Input aria-label="Search" placeholder="Search name or ID" value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }} />
-        <Select aria-label="Department" value={department} onChange={(e) => { setDepartment(e.target.value); setPage(1); }}>
-          <option value="">All departments</option>
+        <Input aria-label="Search" placeholder="Search name or ID" value={search} onChange={(e) => { setSearch(e.target.value); }} />
+        <Select aria-label="Team" value={department} onChange={(e) => { setDepartment(e.target.value); }}>
+          <option value="">All teams</option>
           {departments.data?.map((d) => <option key={d._id} value={d._id}>{d.name}</option>)}
         </Select>
         <Select aria-label="Year" value={year} onChange={(e) => setYear(Number(e.target.value))}>
@@ -49,7 +50,7 @@ export function BalancesAdminPage() {
           onRowClick={(r) => navigate(`/admin/employees/${r._id}`)}
           empty="No employees match."
           columns={[
-            { header: 'Employee', cell: (r) => <div><div className="font-medium">{r.fullName}</div><div className="text-xs text-muted">{r.employeeId} · {r.department ?? 'No department'}</div></div> },
+            { header: 'Employee', cell: (r) => <div><div className="font-medium">{r.fullName}</div><div className="text-xs text-muted">{r.employeeId} · {r.department ?? 'No team'}</div></div> },
             {
               header: 'Available days',
               cell: (r) => (
@@ -65,7 +66,7 @@ export function BalancesAdminPage() {
             },
           ]}
         />
-        <Pagination meta={meta} onPage={setPage} />
+        <InfiniteLoader list={list} />
       </Card>
     </>
   );

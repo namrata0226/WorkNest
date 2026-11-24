@@ -128,7 +128,7 @@ export function TeamCalendarPage() {
           <DateBadge date={today} />
           <div className="min-w-0 flex-1">
             <div className="truncate text-[20px] font-semibold tracking-tight">{range?.title ?? ' '}</div>
-            <div className="text-[13px] text-muted">Who is away from your team and department. Leave types and reasons stay private.</div>
+            <div className="text-[13px] text-muted">Who is away from your team. Leave types and reasons stay private.</div>
           </div>
           {loading && <span className="text-brand"><Spinner small /></span>}
           <div className="flex flex-wrap items-center gap-2">

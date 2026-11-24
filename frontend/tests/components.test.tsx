@@ -7,6 +7,9 @@ import { api } from '../src/api/client';
 import { CalendarEvent, CalendarHoliday, LeaveCalendar, toFullCalendarEvents, VisibleRange } from '../src/components/LeaveCalendar';
 import { Button, DataTable, Modal, Pagination, StatusBadge, ToastProvider, useConfirm, useToast } from '../src/components/ui';
 import { ApprovalsPage } from '../src/pages/ApprovalsPage';
+import { useInfiniteFetch } from '../src/hooks/useInfiniteFetch';
+import { InfiniteLoader } from '../src/components/ui';
+import { AppLayout } from '../src/layouts/AppLayout';
 import { ItemModal } from '../src/components/planner/ItemModal';
 import { ExpensesPage } from '../src/pages/ExpensesPage';
 import { expenseSchema } from '../src/validations';
@@ -119,7 +122,7 @@ describe('login page', () => {
 });
 
 describe('employee form', () => {
-  it('shows the saved department, manager and location once its options have loaded', async () => {
+  it('shows the saved team, manager and location once its options have loaded', async () => {
     mockApi({
       '/departments': [{ _id: 'd1', name: 'Engineering' }],
       '/locations': [{ _id: 'l1', name: 'Mumbai' }],
@@ -128,7 +131,7 @@ describe('employee form', () => {
     });
     const saved = { ...employee, gender: 'FEMALE', department: { _id: 'd1', name: 'Engineering' }, location: { _id: 'l1', name: 'Mumbai' }, reportingManager: { _id: 'm1', fullName: 'A Manager', employeeId: 'EMP001' } } as NonNullable<CurrentUser['employee']>;
     renderApp(<EmployeeFormModal employee={saved} onClose={() => undefined} onSaved={() => undefined} />);
-    expect(await screen.findByLabelText(/Department/)).toHaveValue('d1');
+    expect(await screen.findByLabelText(/^Team/)).toHaveValue('d1');
     expect(screen.getByLabelText(/Office location/)).toHaveValue('l1');
     expect(screen.getByLabelText(/Reporting manager/)).toHaveValue('m1');
     expect(screen.getByLabelText(/Gender/)).toHaveValue('FEMALE');
@@ -843,5 +846,110 @@ describe('adding to the calendar', () => {
     await user.type(await screen.findByLabelText(/Title/), 'Submit receipts');
     await user.click(screen.getByRole('button', { name: 'Add task' }));
     await waitFor(() => expect(post).toHaveBeenCalledWith('/calendar/items', expect.objectContaining({ kind: 'TASK', allDay: true, startTime: null, endTime: null, reminderMinutes: null })));
+  });
+});
+
+describe('header links', () => {
+  const app = (
+    <Routes>
+      <Route element={<AppLayout />}>
+        <Route path="/notifications" element={<div>notifications page</div>} />
+        <Route path="/dashboard" element={<div>home page</div>} />
+      </Route>
+    </Routes>
+  );
+
+  it('highlights the bell and names the page while notifications are open', async () => {
+    mockApi({ '/notifications/unread-count': { unread: 2 } });
+    renderApp(app, '/notifications');
+    const bell = await screen.findByRole('link', { name: /Notifications, \d+ unread/ });
+    expect(bell).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByRole('banner')).toHaveTextContent('Notifications');
+  });
+
+  it('does not highlight the bell elsewhere', async () => {
+    mockApi({ '/notifications/unread-count': { unread: 0 } });
+    renderApp(app, '/dashboard');
+    await screen.findByText('home page');
+    expect(screen.getByRole('link', { name: /Notifications, \d+ unread/ })).not.toHaveAttribute('aria-current');
+  });
+});
+
+describe('infinite scroll', () => {
+  const page = (n: number, total = 4, limit = 2) => ({ data: { data: [{ id: `r${(n - 1) * limit + 1}` }, { id: `r${(n - 1) * limit + 2}` }], meta: { page: n, limit, total, totalPages: Math.ceil(total / limit) } } });
+
+  function List({ filter = '' }: { filter?: string }) {
+    const list = useInfiniteFetch<{ id: string }[]>('/things', { filter }, { limit: 2 });
+    return <><ul>{list.data?.map((r) => <li key={r.id}>{r.id}</li>)}</ul><InfiniteLoader list={list} /></>;
+  }
+
+  it('adds the next page to the end of the list, then says everything is shown', async () => {
+    const get = vi.spyOn(api, 'get').mockImplementation(async (_url: string, config?: { params?: unknown }) => page((config?.params as { page: number }).page));
+    const user = userEvent.setup();
+    render(<List />);
+    expect(await screen.findByText('r2')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Load more' }));
+    expect(await screen.findByText('r4')).toBeInTheDocument();
+    expect(screen.getAllByRole('listitem')).toHaveLength(4);
+    expect(screen.getByText('All 4 records shown')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Load more' })).not.toBeInTheDocument();
+    expect(get).toHaveBeenLastCalledWith('/things', { params: { filter: undefined, page: 2, limit: 2 } });
+  });
+
+  it('starts again from the first page when a filter changes', async () => {
+    const get = vi.spyOn(api, 'get').mockImplementation(async (_url: string, config?: { params?: unknown }) => page((config?.params as { page: number }).page));
+    const user = userEvent.setup();
+    const { rerender } = render(<List />);
+    await user.click(await screen.findByRole('button', { name: 'Load more' }));
+    await screen.findByText('r4');
+    rerender(<List filter="sick" />);
+    await waitFor(() => expect(screen.getAllByRole('listitem')).toHaveLength(2));
+    expect(get).toHaveBeenLastCalledWith('/things', { params: { filter: 'sick', page: 1, limit: 2 } });
+  });
+
+  it('keeps the totals of a wrapped response and joins its rows', async () => {
+    vi.spyOn(api, 'get').mockImplementation(async (_url: string, config?: { params?: unknown }) => {
+      const n = (config?.params as { page: number }).page;
+      return { data: { data: { summary: { present: 7 }, rows: [{ id: `p${n}` }] }, meta: { page: n, limit: 1, total: 2, totalPages: 2 } } };
+    });
+    function Wrapped() {
+      const list = useInfiniteFetch<{ summary: { present: number }; rows: { id: string }[] }>('/daily', {}, { limit: 1, rowsKey: 'rows' });
+      return <><span>present {list.data?.summary.present}</span><span>{list.data?.rows.map((r) => r.id).join(',')}</span><InfiniteLoader list={list} /></>;
+    }
+    const user = userEvent.setup();
+    render(<Wrapped />);
+    await user.click(await screen.findByRole('button', { name: 'Load more' }));
+    expect(await screen.findByText('p1,p2')).toBeInTheDocument();
+    expect(screen.getByText('present 7')).toBeInTheDocument();
+  });
+});
+
+describe('editing my own profile', () => {
+  it('gives an employee name and phone only', async () => {
+    mockApi({});
+    const user = userEvent.setup();
+    renderApp(<AccountPage />);
+    await user.click(await screen.findByRole('button', { name: 'Edit profile' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Edit profile' });
+    expect(within(dialog).getByLabelText(/Full name/)).toBeInTheDocument();
+    expect(within(dialog).getByLabelText(/Phone/)).toBeInTheDocument();
+    expect(within(dialog).queryByLabelText(/Gender/)).not.toBeInTheDocument();
+    expect(within(dialog).queryByLabelText(/^Email/)).not.toBeInTheDocument();
+  });
+
+  it('gives someone who manages employees every field, saved to their employee record', async () => {
+    const admin: CurrentUser = { ...asEmployee, role: 'SUPER_ADMIN', permissions: ['employees:write', 'employees:read'] };
+    mockApi({ '/departments': [{ _id: 'd1', name: 'Platform' }], '/locations': [], '/leave-policies': [], '/employees': [] }, admin);
+    const put = vi.spyOn(api, 'put').mockResolvedValue({ data: { data: {} } });
+    const user = userEvent.setup();
+    renderApp(<AccountPage />);
+    await user.click(await screen.findByRole('button', { name: 'Edit profile' }));
+    const dialog = await screen.findByRole('dialog', { name: /Edit Sara Khan/ });
+    for (const label of [/^Email/, /^Gender/, /^Team/, /^Designation/, /^Reporting manager/, /^Joining date/]) {
+      expect(within(dialog).getByLabelText(label)).toBeInTheDocument();
+    }
+    await user.selectOptions(within(dialog).getByLabelText(/^Gender/), 'FEMALE');
+    await user.click(within(dialog).getByRole('button', { name: 'Save changes' }));
+    await waitFor(() => expect(put).toHaveBeenCalledWith('/employees/e1', expect.objectContaining({ gender: 'FEMALE', email: 's@x.co' })));
   });
 });

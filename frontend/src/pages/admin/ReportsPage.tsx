@@ -1,6 +1,7 @@
 import { useState } from 'react';
-import { Button, Card, DataTable, Field, Input, Note, PageHeader, Pagination, Select, useToast } from '../../components/ui';
+import { Button, Card, DataTable, Field, InfiniteLoader, Input, Note, PageHeader, Select, useToast } from '../../components/ui';
 import { useFetch } from '../../hooks/useFetch';
+import { useInfiniteFetch } from '../../hooks/useInfiniteFetch';
 import { downloadFile } from '../../services/download';
 import type { Employee, LeaveType, Named } from '../../types';
 import { currentYear, todayString } from '../../utils/date';
@@ -11,7 +12,7 @@ const REPORTS: { value: string; label: string; period: Period; hint: string }[] 
   { value: 'monthly', label: 'Monthly leave', period: 'month', hint: 'Days taken per employee and leave type in a month' },
   { value: 'annual', label: 'Annual leave', period: 'year', hint: 'Days taken per employee, month by month' },
   { value: 'employee', label: 'Employee-wise leave', period: 'range', hint: 'Each request, for one person or everyone' },
-  { value: 'department', label: 'Department-wise leave', period: 'range', hint: 'Days and headcount by department' },
+  { value: 'department', label: 'Team-wise leave', period: 'range', hint: 'Days and headcount by team' },
   { value: 'balances', label: 'Remaining balances', period: 'year', hint: 'Every balance component per employee' },
   { value: 'compoff', label: 'Comp-Off earned and used', period: 'range', hint: 'Lifetime totals, or credits earned within dates' },
   { value: 'compoff-expiry', label: 'Comp-Off expiry', period: 'range', hint: 'Unused credits, soonest expiry first' },
@@ -32,18 +33,17 @@ export function ReportsPage() {
   const [employee, setEmployee] = useState('');
   const [department, setDepartment] = useState('');
   const [leaveType, setLeaveType] = useState('');
-  const [page, setPage] = useState(1);
   const [exporting, setExporting] = useState<string | null>(null);
 
   const meta = REPORTS.find((r) => r.value === report)!;
   const period = meta.period === 'month' ? { month } : meta.period === 'year' ? { year } : meta.period === 'range' ? { from, to } : {};
   const filters = { ...period, employee, department, leaveType };
 
-  const { data, meta: pageMeta, loading, error } = useFetch<ReportData>(`/reports/${report}`, { ...filters, page, limit: 50 });
+  const list = useInfiniteFetch<ReportData>(`/reports/${report}`, { ...filters }, { limit: 50, rowsKey: 'rows' });
+  const { data, meta: pageMeta, loading, error } = list;
   const employees = useFetch<Employee[]>('/employees', { limit: 200, sort: 'fullName', order: 'asc' });
   const departments = useFetch<Named[]>('/departments');
   const types = useFetch<LeaveType[]>('/leave-types');
-  const reset = () => setPage(1);
 
   const exportAs = async (format: 'xlsx' | 'csv') => {
     setExporting(format);
@@ -77,35 +77,35 @@ export function ReportsPage() {
       <Card className="mb-3">
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           <Field label="Report">
-            <Select value={report} onChange={(e) => { setReport(e.target.value); reset(); }}>
+            <Select value={report} onChange={(e) => setReport(e.target.value)}>
               {REPORTS.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
             </Select>
           </Field>
-          {meta.period === 'month' && <Field label="Month"><Input type="month" value={month} onChange={(e) => { setMonth(e.target.value); reset(); }} /></Field>}
-          {meta.period === 'year' && <Field label="Year"><Input type="number" value={year} onChange={(e) => { setYear(Number(e.target.value)); reset(); }} /></Field>}
+          {meta.period === 'month' && <Field label="Month"><Input type="month" value={month} onChange={(e) => setMonth(e.target.value)} /></Field>}
+          {meta.period === 'year' && <Field label="Year"><Input type="number" value={year} onChange={(e) => setYear(Number(e.target.value))} /></Field>}
           {meta.period === 'range' && (
             <>
-              <Field label="From"><Input type="date" value={from} onChange={(e) => { setFrom(e.target.value); reset(); }} /></Field>
-              <Field label="To"><Input type="date" value={to} onChange={(e) => { setTo(e.target.value); reset(); }} /></Field>
+              <Field label="From"><Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} /></Field>
+              <Field label="To"><Input type="date" value={to} onChange={(e) => setTo(e.target.value)} /></Field>
             </>
           )}
           {report !== 'holidays' && (
             <>
               <Field label="Employee">
-                <Select value={employee} onChange={(e) => { setEmployee(e.target.value); reset(); }}>
+                <Select value={employee} onChange={(e) => setEmployee(e.target.value)}>
                   <option value="">Everyone</option>
                   {employees.data?.map((e) => <option key={e._id} value={e._id}>{e.fullName} ({e.employeeId})</option>)}
                 </Select>
               </Field>
-              <Field label="Department">
-                <Select value={department} onChange={(e) => { setDepartment(e.target.value); reset(); }}>
-                  <option value="">All departments</option>
+              <Field label="Team">
+                <Select value={department} onChange={(e) => setDepartment(e.target.value)}>
+                  <option value="">All teams</option>
                   {departments.data?.map((d) => <option key={d._id} value={d._id}>{d.name}</option>)}
                 </Select>
               </Field>
               {!['compoff', 'compoff-expiry'].includes(report) && (
                 <Field label="Leave type">
-                  <Select value={leaveType} onChange={(e) => { setLeaveType(e.target.value); reset(); }}>
+                  <Select value={leaveType} onChange={(e) => setLeaveType(e.target.value)}>
                     <option value="">All leave types</option>
                     {types.data?.map((t) => <option key={t._id} value={t._id}>{t.name}</option>)}
                   </Select>
@@ -118,7 +118,7 @@ export function ReportsPage() {
       {error && <Note>{error}</Note>}
       <Card flush title={data?.title}>
         <DataTable<Record<string, unknown>> rows={data?.rows} loading={loading} rowKey={(r) => JSON.stringify(r)} columns={columns} empty="No data for these filters." />
-        <Pagination meta={pageMeta} onPage={setPage} />
+        <InfiniteLoader list={list} />
       </Card>
     </>
   );

@@ -92,7 +92,11 @@ function useWide() {
   return wide;
 }
 
-export function Planner() {
+/**
+ * The calendar. `compact` is the dashboard version: the same toolbar and grids without the side panel, a shorter
+ * grid, details in a pop-up, and a link to the full page.
+ */
+export function Planner({ compact = false }: { compact?: boolean } = {}) {
   const { user } = useAuth();
   const toast = useToast();
   const confirm = useConfirm();
@@ -191,15 +195,16 @@ export function Planner() {
             <option value="week">Week view</option>
             <option value="month">Month view</option>
           </Select>
+          {compact && <Link to="/calendar" className="inline-flex items-center gap-1 rounded-lg px-2.5 py-2 text-[13px] font-medium text-brand hover:bg-brand-soft">Open calendar<Icon name="chevronRight" size={14} /></Link>}
           <Button variant="primary" aria-label="Add an event or task" onClick={() => add({ kind: 'EVENT', date: cursor < today && view !== 'day' ? today : cursor })}><Icon name="plus" size={16} /><span className="hidden sm:inline">Add</span></Button>
         </div>
       </div>
 
       {(items.error || away.error) && <div className="px-4 pt-3 sm:px-5"><Note>{items.error ?? away.error}</Note></div>}
 
-      <div className="grid lg:grid-cols-[320px_minmax(0,1fr)]">
+      <div className={cx('grid', !compact && 'lg:grid-cols-[320px_minmax(0,1fr)]')}>
         {/* Side panel */}
-        <aside className="order-2 border-t border-line lg:order-1 lg:border-r lg:border-t-0">
+        {!compact && <aside className="order-2 border-t border-line lg:order-1 lg:border-r lg:border-t-0">
           <MiniMonth cursor={cursor} today={today} entries={all} onPick={(d) => { setCursor(d); setSelectedKey(null); }} />
           <div className="border-t border-line p-4">
             {wide && details ? details : (
@@ -209,19 +214,19 @@ export function Planner() {
               </div>
             )}
           </div>
-        </aside>
+        </aside>}
 
         {/* Main grid */}
         <div className="order-1 min-w-0 lg:order-2">
           {view === 'month' ? (
             <MonthGrid days={grid} month={cursor.slice(0, 7)} today={today} entries={entries} selectedKey={selectedKey} onSelect={setSelectedKey} onDay={(d) => { setCursor(d); setView('day'); }} onAdd={(d) => add({ kind: 'EVENT', date: d, allDay: true })} />
           ) : (
-            <TimeGrid days={days} today={today} entries={entries} selectedKey={selectedKey} onSelect={setSelectedKey} onToggle={toggleDone} onAdd={(date, start) => add({ kind: 'EVENT', date, startTime: start, endTime: fromMinutes(toMinutes(start) + 60) })} onDay={(d) => { setCursor(d); setView('day'); }} />
+            <TimeGrid compact={compact} days={days} today={today} entries={entries} selectedKey={selectedKey} onSelect={setSelectedKey} onToggle={toggleDone} onAdd={(date, start) => add({ kind: 'EVENT', date, startTime: start, endTime: fromMinutes(toMinutes(start) + 60) })} onDay={(d) => { setCursor(d); setView('day'); }} />
           )}
         </div>
       </div>
 
-      {!wide && selected && <Modal title={selected.type === 'TASK' ? 'Task' : selected.type === 'EVENT' ? 'Event' : selected.type === 'LEAVE' ? 'Leave' : 'Holiday'} onClose={() => setSelectedKey(null)}>{details}</Modal>}
+      {(!wide || compact) && selected && <Modal title={selected.type === 'TASK' ? 'Task' : selected.type === 'EVENT' ? 'Event' : selected.type === 'LEAVE' ? 'Leave' : 'Holiday'} onClose={() => setSelectedKey(null)}>{details}</Modal>}
       {editing && (
         <ItemModal
           item={editing.item}
@@ -511,7 +516,7 @@ function placement(lane: number, lanes: number, wide: boolean) {
   return { left: 3 + lane * step, width: `calc(100% - ${6 + lane * step}px)`, zIndex: lane + 1 };
 }
 
-function TimeGrid({ days, today, entries, selectedKey, onSelect, onToggle, onAdd, onDay }: { days: string[]; today: string; entries: Entry[]; selectedKey: string | null; onSelect: (key: string) => void; onToggle: (item: CalendarItem) => Promise<void>; onAdd: (date: string, start: string) => void; onDay: (date: string) => void }) {
+function TimeGrid({ compact, days, today, entries, selectedKey, onSelect, onToggle, onAdd, onDay }: { compact?: boolean; days: string[]; today: string; entries: Entry[]; selectedKey: string | null; onSelect: (key: string) => void; onToggle: (item: CalendarItem) => Promise<void>; onAdd: (date: string, start: string) => void; onDay: (date: string) => void }) {
   const now = useNow();
   const scroller = useRef<HTMLDivElement>(null);
   const visible = entries.filter((e) => days.some((d) => covers(e, d)));
@@ -579,7 +584,7 @@ function TimeGrid({ days, today, entries, selectedKey, onSelect, onToggle, onAdd
         )}
 
         {/* Hours */}
-        <div ref={scroller} className="relative h-[max(480px,calc(100vh-290px))] overflow-y-auto">
+        <div ref={scroller} className={cx('relative overflow-y-auto', compact ? 'h-[440px]' : 'h-[max(480px,calc(100vh-290px))]')}>
           <div className="relative grid" style={columns}>
             <div>
               {hours.map((h) => (

@@ -88,14 +88,14 @@ export const listLocations: RequestHandler = async (_req, res) => ok(res, await 
 
 export const createDepartment: RequestHandler = async (req, res) => {
   const doc = await Department.create(req.valid.body);
-  await audit(ctxOf(req), { action: 'DEPARTMENT_CREATED', entityType: 'Department', entityId: doc._id, summary: doc.name });
+  await audit(ctxOf(req), { action: 'TEAM_CREATED', entityType: 'Team', entityId: doc._id, summary: doc.name });
   created(res, doc);
 };
 
 export const updateDepartment: RequestHandler = async (req, res) => {
   const doc = await Department.findByIdAndUpdate(req.valid.params.id, { $set: req.valid.body }, { returnDocument: 'after', runValidators: true }).lean();
-  if (!doc) throw notFound('Department');
-  await audit(ctxOf(req), { action: 'DEPARTMENT_UPDATED', entityType: 'Department', entityId: doc._id, summary: doc.name, after: req.valid.body });
+  if (!doc) throw notFound('Team');
+  await audit(ctxOf(req), { action: 'TEAM_UPDATED', entityType: 'Team', entityId: doc._id, summary: doc.name, after: req.valid.body });
   ok(res, doc);
 };
 

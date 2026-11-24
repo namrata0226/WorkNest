@@ -101,7 +101,7 @@ export const NAV: NavGroup[] = [
           { to: '/admin/holidays', label: 'Holidays', permission: 'holidays:manage' },
           { to: '/admin/leave-types', label: 'Leave types', permission: 'leave_policy:manage' },
           { to: '/admin/policies', label: 'Leave policies', permission: 'leave_policy:manage' },
-          { to: '/admin/org', label: 'Departments & locations', permission: 'org:manage' },
+          { to: '/admin/org', label: 'Teams & locations', permission: 'org:manage' },
           { to: '/super/workflows', label: 'Approval workflows', permission: 'workflows:manage' },
           { to: '/super/admins', label: 'Admin accounts', permission: 'admins:manage' },
         ],

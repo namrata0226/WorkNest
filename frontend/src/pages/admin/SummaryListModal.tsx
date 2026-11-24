@@ -34,7 +34,7 @@ function PersonCell({ person, sub }: { person: Person; sub?: ReactNode }) {
       <PersonAvatar person={person} />
       <div className="min-w-0">
         <div className="truncate text-[13px] font-medium">{person.fullName}</div>
-        <div className="truncate text-[11.5px] text-muted">{sub ?? [person.employeeId, person.department ?? 'No department'].join(' · ')}</div>
+        <div className="truncate text-[11.5px] text-muted">{sub ?? [person.employeeId, person.department ?? 'No team'].join(' · ')}</div>
       </div>
     </div>
   );
@@ -175,7 +175,7 @@ export function SummaryListModal({ kind, month, filters, onClose, onOpenLeave }:
           {filtered ? ' · filters from the page apply' : ''}
           {kind !== 'active' && kind !== 'peak' ? ' · select a row to see the request' : ''}
         </p>
-        <Input aria-label="Filter this list" placeholder="Filter by name, ID or department" className={cx('w-64 py-1.5')} value={query} onChange={(e) => setQuery(e.target.value)} />
+        <Input aria-label="Filter this list" placeholder="Filter by name, ID or team" className={cx('w-64 py-1.5')} value={query} onChange={(e) => setQuery(e.target.value)} />
       </div>
       {error && <Note>{error}</Note>}
       {loading && !data ? <Loading /> : <div className="max-h-[60vh] overflow-y-auto">{body}</div>}

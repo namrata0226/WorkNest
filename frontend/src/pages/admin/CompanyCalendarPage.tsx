@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { CalendarEvent, CalendarHoliday, CalendarLegend, LeaveCalendar, VisibleRange } from '../../components/LeaveCalendar';
-import { Button, Card, DataTable, Input, Loading, Modal, Note, PageHeader, Pagination, Select, Stat, Tabs, useToast } from '../../components/ui';
+import { Button, Card, DataTable, InfiniteLoader, Input, Loading, Modal, Note, PageHeader, Select, Stat, Tabs, useToast } from '../../components/ui';
 import { useFetch } from '../../hooks/useFetch';
+import { useInfiniteFetch } from '../../hooks/useInfiniteFetch';
 import { downloadFile } from '../../services/download';
 import type { LeaveRequest, LeaveType, Named } from '../../types';
 import { formatDate, formatMonth, todayString } from '../../utils/date';
@@ -56,7 +57,6 @@ export function CompanyCalendarPage() {
   const [status, setStatus] = useState('');
   const [selected, setSelected] = useState<string | null>(null);
   const [listing, setListing] = useState<SummaryKind | null>(null);
-  const [tablePage, setTablePage] = useState(1);
   const [tableMonth, setTableMonth] = useState(todayString().slice(0, 7));
   const [exporting, setExporting] = useState<string | null>(null);
 
@@ -71,7 +71,7 @@ export function CompanyCalendarPage() {
     range ? '/calendar/company' : null,
     range ? { start: range.start, end: range.end, status, ...filters } : undefined,
   );
-  const summary = useFetch<Summary>('/calendar/summary', { month, ...filters, page: tablePage, limit: 50 });
+  const summary = useInfiniteFetch<Summary>('/calendar/summary', { month, ...filters }, { limit: 50, rowsKey: 'rows' });
 
   const onRange = (next: VisibleRange) => {
     setRange(next);
@@ -122,12 +122,12 @@ export function CompanyCalendarPage() {
       </div>
 
       <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-        <Input aria-label="Search by employee name or ID" placeholder="Search name or employee ID" value={searchText} onChange={(e) => { setSearchText(e.target.value); setTablePage(1); }} />
-        <Select aria-label="Filter by department" value={department} onChange={(e) => { setDepartment(e.target.value); setTablePage(1); }}>
-          <option value="">All departments</option>
+        <Input aria-label="Search by employee name or ID" placeholder="Search name or employee ID" value={searchText} onChange={(e) => { setSearchText(e.target.value); }} />
+        <Select aria-label="Filter by team" value={department} onChange={(e) => { setDepartment(e.target.value); }}>
+          <option value="">All teams</option>
           {departments.data?.map((d) => <option key={d._id} value={d._id}>{d.name}</option>)}
         </Select>
-        <Select aria-label="Filter by leave type" value={leaveType} onChange={(e) => { setLeaveType(e.target.value); setTablePage(1); }}>
+        <Select aria-label="Filter by leave type" value={leaveType} onChange={(e) => { setLeaveType(e.target.value); }}>
           <option value="">All leave types</option>
           {activeTypes.map((t) => <option key={t._id} value={t._id}>{t.name}</option>)}
         </Select>
@@ -138,7 +138,7 @@ export function CompanyCalendarPage() {
             <option value="PENDING">Pending only</option>
           </Select>
         ) : (
-          <Input aria-label="Month" type="month" value={tableMonth} onChange={(e) => { if (e.target.value) { setTableMonth(e.target.value); setTablePage(1); } }} />
+          <Input aria-label="Month" type="month" value={tableMonth} onChange={(e) => { if (e.target.value) { setTableMonth(e.target.value); } }} />
         )}
       </div>
 
@@ -162,7 +162,7 @@ export function CompanyCalendarPage() {
             columns={[
               { header: 'Employee Name', cell: (r) => <Link className="font-medium hover:underline" to={`/admin/employees/${r.employeeRef}`}>{r.employeeName}</Link> },
               { header: 'Employee ID', cell: (r) => r.employeeId, className: 'text-muted' },
-              { header: 'Department', cell: (r) => r.department || '—', className: 'text-muted' },
+              { header: 'Team', cell: (r) => r.department || '—', className: 'text-muted' },
               { header: 'Casual Leave', align: 'right', cell: (r) => r.casual },
               { header: 'Sick Leave', align: 'right', cell: (r) => r.sick },
               { header: 'Earned Leave', align: 'right', cell: (r) => r.earned },
@@ -171,7 +171,7 @@ export function CompanyCalendarPage() {
               { header: 'Total Leave Days', align: 'right', cell: (r) => <span className="font-semibold">{r.total}</span> },
             ]}
           />
-          <Pagination meta={summary.meta} onPage={setTablePage} />
+          <InfiniteLoader list={summary} />
         </Card>
       )}
 

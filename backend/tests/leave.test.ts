@@ -611,3 +611,27 @@ describe('reading balances', () => {
     spy.mockRestore();
   });
 });
+
+describe('the top of the hierarchy', () => {
+  it('approves a Super Admin with no manager automatically, as nobody is above them', async () => {
+    const top = await makePerson({ role: 'SUPER_ADMIN', name: 'Amudha Top' });
+    const agent = await agentFor(top.email);
+    const res = await agent.post('/api/leaves').send({ ...fullDay(cl, MON), reason: undefined });
+    expect(res.status).toBe(201);
+    expect(res.body.data).toMatchObject({ status: 'APPROVED', approvalSteps: [] });
+  });
+
+  it('sends a Super Admin with a manager to that manager as usual', async () => {
+    const top = await makePerson({ role: 'SUPER_ADMIN', name: 'Amudha Top' });
+    const second = await makePerson({ role: 'SUPER_ADMIN', name: 'Dinjit Second', manager: top.employee._id });
+    const res = await (await agentFor(second.email)).post('/api/leaves').send(fullDay(cl, TUE));
+    expect(res.status).toBe(201);
+    expect(res.body.data.status).toBe('PENDING');
+    // Amudha can take it through every step on her own, so Dinjit's leave never gets stuck.
+    const topAgent = await agentFor(top.email);
+    for (let step = 0; step < 5 && (await LeaveRequest.findById(res.body.data._id).lean())!.status === 'PENDING'; step++) {
+      expect((await topAgent.patch(`/api/approvals/${res.body.data._id}/approve`).send({})).status).toBe(200);
+    }
+    expect((await LeaveRequest.findById(res.body.data._id).lean())!.status).toBe('APPROVED');
+  });
+});

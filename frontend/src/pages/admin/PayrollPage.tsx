@@ -28,8 +28,8 @@ export function PayrollPage() {
       <PageHeader title="Payroll preparation" subtitle="Payable days are the days employed in the month, less absences and unpaid leave" actions={<Button variant="primary" onClick={() => exportFile()}>Export to Excel</Button>} />
       <div className="mb-3 grid gap-2 sm:grid-cols-3">
         <Input aria-label="Month" type="month" value={month} onChange={(e) => { if (e.target.value) setMonth(e.target.value); }} />
-        <Select aria-label="Department" value={department} onChange={(e) => setDepartment(e.target.value)}>
-          <option value="">All departments</option>
+        <Select aria-label="Team" value={department} onChange={(e) => setDepartment(e.target.value)}>
+          <option value="">All teams</option>
           {departments.data?.map((d) => <option key={d._id} value={d._id}>{d.name}</option>)}
         </Select>
         <Input aria-label="Search" placeholder="Search name or ID" value={search} onChange={(e) => setSearch(e.target.value)} />

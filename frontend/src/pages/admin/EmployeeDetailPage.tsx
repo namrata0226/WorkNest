@@ -1,9 +1,10 @@
 import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { api, errorMessage } from '../../api/client';
-import { Button, Card, DataTable, Loading, Note, PageHeader, Pagination, Select, StatusBadge, TypeTag, useConfirm, useToast } from '../../components/ui';
+import { Button, Card, DataTable, InfiniteLoader, Loading, Note, PageHeader, Select, StatusBadge, TypeTag, useConfirm, useToast } from '../../components/ui';
 import { useAuth } from '../../context/AuthContext';
 import { useFetch } from '../../hooks/useFetch';
+import { useInfiniteFetch } from '../../hooks/useInfiniteFetch';
 import type { BalanceRow, Employee, LedgerRow, LeaveRequest } from '../../types';
 import { currentYear, formatDate, formatRange } from '../../utils/date';
 import { titleCase } from '../../utils/labels';
@@ -18,8 +19,6 @@ export function EmployeeDetailPage() {
   const toast = useToast();
   const confirm = useConfirm();
   const [year, setYear] = useState(currentYear());
-  const [leavePage, setLeavePage] = useState(1);
-  const [ledgerPage, setLedgerPage] = useState(1);
   const [editing, setEditing] = useState(false);
   const [adjusting, setAdjusting] = useState(false);
   const [links, setLinks] = useState<{ email: string; link: string }[] | null>(null);
@@ -27,8 +26,8 @@ export function EmployeeDetailPage() {
   const employee = useFetch<Employee>(`/employees/${id}`);
   const canBalances = can('balances:read');
   const balances = useFetch<{ balances: BalanceRow[] }>(canBalances ? `/leave-balances/${id}` : null, { year });
-  const ledger = useFetch<LedgerRow[]>(canBalances ? `/leave-balances/${id}/transactions` : null, { year, page: ledgerPage, limit: 15 });
-  const leaves = useFetch<LeaveRequest[]>(can('leave:read_all') ? '/leaves' : null, { employee: id, page: leavePage, limit: 10, sort: 'startDate', order: 'desc' });
+  const ledger = useInfiniteFetch<LedgerRow[]>(canBalances ? `/leave-balances/${id}/transactions` : null, { year }, { limit: 15 });
+  const leaves = useInfiniteFetch<LeaveRequest[]>(can('leave:read_all') ? '/leaves' : null, { employee: id, sort: 'startDate', order: 'desc' }, { limit: 10 });
 
   if (employee.loading && !employee.data) return <Loading />;
   if (employee.error) return <Note>{employee.error}</Note>;
@@ -62,7 +61,7 @@ export function EmployeeDetailPage() {
   };
 
   const facts: [string, React.ReactNode][] = [
-    ['Employee ID', e.employeeId], ['Email', e.email], ['Phone', e.phone ?? '—'], ['Gender', e.gender ? titleCase(e.gender) : 'Not recorded'], ['Department', e.department?.name ?? '—'],
+    ['Employee ID', e.employeeId], ['Email', e.email], ['Phone', e.phone ?? '—'], ['Gender', e.gender ? titleCase(e.gender) : 'Not recorded'], ['Team', e.department?.name ?? '—'],
     ['Designation', e.designation ?? '—'], ['Reporting manager', e.reportingManager ? <Link key="m" className="text-brand hover:underline" to={`/admin/employees/${e.reportingManager._id}`}>{e.reportingManager.fullName}</Link> : '—'],
     ['Location', e.location?.name ?? '—'], ['Joined', formatDate(e.joiningDate)], ['Category', titleCase(e.category)], ['Leave policy', e.leavePolicy?.name ?? 'Automatic'],
   ];
@@ -103,7 +102,7 @@ export function EmployeeDetailPage() {
           title="Leave balances"
           actions={
             <div className="flex items-center gap-2">
-              <Select aria-label="Year" className="py-1" value={year} onChange={(ev) => { setYear(Number(ev.target.value)); setLedgerPage(1); }}>
+              <Select aria-label="Year" className="py-1" value={year} onChange={(ev) => { setYear(Number(ev.target.value)); }}>
                 {yearOptions().map((y) => <option key={y} value={y}>{y}</option>)}
               </Select>
               {can('balances:adjust') && <Button small onClick={() => setAdjusting(true)}>Adjust balance</Button>}
@@ -129,14 +128,14 @@ export function EmployeeDetailPage() {
               { header: 'Status', cell: (r) => <StatusBadge status={r.status} /> },
             ]}
           />
-          <Pagination meta={leaves.meta} onPage={setLeavePage} />
+          <InfiniteLoader list={leaves} />
         </Card>
       )}
 
       {canBalances && (
         <Card className="mt-4" flush title={`Transaction history, ${year}`}>
           <LedgerTable rows={ledger.data} loading={ledger.loading} showActor />
-          <Pagination meta={ledger.meta} onPage={setLedgerPage} />
+          <InfiniteLoader list={ledger} />
         </Card>
       )}
 

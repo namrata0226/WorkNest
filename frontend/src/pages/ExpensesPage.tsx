@@ -3,8 +3,8 @@ import { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { api, applyServerErrors, errorMessage } from '../api/client';
 import { AttachedDocument, DocumentUpload } from '../components/DocumentUpload';
-import { Button, Card, cx, DataTable, Field, Input, Modal, Note, PageHeader, Pagination, Select, StatusBadge, Textarea, useConfirm, useToast } from '../components/ui';
-import { useFetch } from '../hooks/useFetch';
+import { Button, Card, cx, DataTable, Field, InfiniteLoader, Input, Modal, Note, PageHeader, Select, StatusBadge, Textarea, useConfirm, useToast } from '../components/ui';
+import { useInfiniteFetch } from '../hooks/useInfiniteFetch';
 import { downloadFile } from '../services/download';
 import type { ExpenseClaim } from '../types';
 import { formatDate, todayString } from '../utils/date';
@@ -71,9 +71,9 @@ function NewClaimModal({ onClose, onDone }: { onClose: () => void; onDone: () =>
 export function ExpensesPage() {
   const toast = useToast();
   const confirm = useConfirm();
-  const [page, setPage] = useState(1);
   const [creating, setCreating] = useState(false);
-  const { data, meta, loading, error, reload } = useFetch<ExpenseClaim[]>('/expenses/my', { page, limit: 20 });
+  const list = useInfiniteFetch<ExpenseClaim[]>('/expenses/my', {}, { limit: 20 });
+  const { data, meta, loading, error, reload } = list;
   const cancel = async (c: ExpenseClaim) => {
     if (!(await confirm({ title: 'Cancel this claim?', message: `Your ${money(c.amount)} claim for ${formatDate(c.expenseDate)} will be withdrawn. You can submit a new one later.`, confirmLabel: 'Cancel claim', cancelLabel: 'Keep claim', tone: 'danger' }))) return;
     try {
@@ -104,7 +104,7 @@ export function ExpensesPage() {
             { header: '', align: 'right', cell: (c) => (c.status === 'PENDING' ? <Button small onClick={() => cancel(c)}>Cancel</Button> : null) },
           ]}
         />
-        <Pagination meta={meta} onPage={setPage} />
+        <InfiniteLoader list={list} />
       </Card>
       {creating && <NewClaimModal onClose={() => setCreating(false)} onDone={() => { setCreating(false); void reload(); }} />}
     </>

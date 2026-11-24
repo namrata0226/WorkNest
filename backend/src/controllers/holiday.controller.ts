@@ -96,11 +96,12 @@ export const importFile: RequestHandler = async (req, res) => {
 
     const split = (v: unknown) => String(v ?? '').split(/[;,]/).map((s) => s.trim()).filter(Boolean);
     const locs = split(row.location ?? row.locations);
-    const depts = split(row.department ?? row.departments);
+    // "Team" is the name people see; "Department" columns from older files still work.
+    const depts = split(row.team ?? row.teams ?? row.department ?? row.departments);
     const unknownLoc = locs.find((l) => !locId.has(l.toLowerCase()));
     const unknownDept = depts.find((d) => !deptId.has(d.toLowerCase()));
     if (unknownLoc) { errors.push({ path, message: `Unknown location "${unknownLoc}"` }); continue; }
-    if (unknownDept) { errors.push({ path, message: `Unknown department "${unknownDept}"` }); continue; }
+    if (unknownDept) { errors.push({ path, message: `Unknown team "${unknownDept}"` }); continue; }
 
     try {
       await Holiday.create({

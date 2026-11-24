@@ -190,7 +190,7 @@ describe('monthly summary', () => {
     await leaveFor(eng, cl, FRI, MON);
     const csv = await hrAgent.get('/api/calendar/export?month=2030-03&format=csv');
     expect(csv.headers['content-type']).toMatch(/text\/csv/);
-    expect(csv.text).toContain('Employee Name,Employee ID,Department,Casual Leave');
+    expect(csv.text).toContain('Employee Name,Employee ID,Team,Casual Leave');
     expect(csv.text).toMatch(/Asha Engineer,T\d+,Engineering,2,0,0,0,0,2/);
 
     const xlsx = await hrAgent.get('/api/calendar/export?month=2030-03&format=xlsx').buffer(true).parse((res, cb) => {

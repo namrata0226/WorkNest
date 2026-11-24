@@ -133,7 +133,7 @@ function PolicyModal({ policy, onClose, onDone }: { policy: Policy | null; onClo
         <div className="sm:col-span-2"><Checkbox label="Active" checked={isActive} onChange={(e) => setIsActive(e.target.checked)} /></div>
 
         <div className="mt-1 border-t border-line pt-3 text-xs text-muted sm:col-span-2">Applies automatically to people matching all the groups chosen below. Leave a group empty to ignore it.</div>
-        <Field label="Departments"><CheckboxGroup value={deptIds} onChange={setDeptIds} options={(departments.data ?? []).map((d) => ({ value: d._id, label: d.name }))} /></Field>
+        <Field label="Teams"><CheckboxGroup value={deptIds} onChange={setDeptIds} options={(departments.data ?? []).map((d) => ({ value: d._id, label: d.name }))} /></Field>
         <Field label="Locations"><CheckboxGroup value={locIds} onChange={setLocIds} options={(locations.data ?? []).map((l) => ({ value: l._id, label: l.name }))} /></Field>
         <Field label="Employee categories"><CheckboxGroup value={categories} onChange={setCategories} options={EMPLOYEE_CATEGORIES.map((c) => ({ value: c, label: titleCase(c) }))} /></Field>
         <Field label="Designations" hint="Comma separated"><Input value={designations} onChange={(e) => setDesignations(e.target.value)} /></Field>

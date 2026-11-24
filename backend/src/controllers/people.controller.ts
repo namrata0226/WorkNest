@@ -43,7 +43,7 @@ export const exportAttendance: RequestHandler = async (req, res) => {
     columns: [
       { key: 'employeeId', header: 'Employee ID' },
       { key: 'employeeName', header: 'Employee Name' },
-      { key: 'department', header: 'Department' },
+      { key: 'department', header: 'Team' },
       { key: 'attended', header: 'Total Attendance' },
       { key: 'present', header: 'Present' },
       { key: 'wfh', header: 'Work From Home' },
@@ -131,7 +131,7 @@ export const setItem: RequestHandler = async (req, res) => {
 
 /* Payroll */
 const payrollColumns = [
-  { key: 'employeeId', header: 'Employee ID' }, { key: 'employeeName', header: 'Employee Name' }, { key: 'department', header: 'Department' },
+  { key: 'employeeId', header: 'Employee ID' }, { key: 'employeeName', header: 'Employee Name' }, { key: 'department', header: 'Team' },
   { key: 'employedDays', header: 'Days Employed' }, { key: 'attended', header: 'Total Attendance' }, { key: 'present', header: 'Present' }, { key: 'workFromHome', header: 'Work From Home' },
   { key: 'paidLeave', header: 'Paid Leave' }, { key: 'unpaidLeave', header: 'Unpaid Leave' }, { key: 'holidays', header: 'Holidays' }, { key: 'weekends', header: 'Weekends' },
   { key: 'absent', header: 'Absent' }, { key: 'lossOfPayDays', header: 'Loss Of Pay Days' }, { key: 'payableDays', header: 'Payable Days' },

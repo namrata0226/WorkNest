@@ -350,6 +350,36 @@ export function Pagination({ meta, onPage }: { meta: PageMeta | null; onPage: (p
   );
 }
 
+/**
+ * Sits after a list and loads the next page as it scrolls into view, so lists grow instead of paging.
+ * A button is kept for keyboard users and browsers without IntersectionObserver.
+ */
+export function InfiniteLoader({ list, noun = 'records' }: { list: { meta: PageMeta | null; hasMore: boolean; loading: boolean; loadingMore: boolean; loadMore: () => void; data: unknown }; noun?: string }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const { hasMore, loading, loadingMore, loadMore, meta } = list;
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || !hasMore || loading || typeof IntersectionObserver === 'undefined') return;
+    // Starts loading a little before the end is reached, so scrolling rarely has to wait.
+    const observer = new IntersectionObserver((entries) => { if (entries.some((e) => e.isIntersecting)) loadMore(); }, { rootMargin: '0px 0px 320px 0px' });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [hasMore, loading, loadMore, meta?.page]);
+
+  if (!meta || meta.total === 0) return null;
+  return (
+    <div ref={ref} className="flex items-center justify-center gap-2 border-t border-line px-4 py-3 text-xs text-muted" aria-live="polite">
+      {loadingMore ? (
+        <><Spinner small /><span>Loading more…</span></>
+      ) : hasMore ? (
+        <button type="button" onClick={loadMore} className="rounded-md px-2 py-1 font-medium text-brand hover:bg-brand-soft">Load more</button>
+      ) : (
+        <span className="tnum">{meta.totalPages > 1 ? `All ${meta.total} ${noun} shown` : `${meta.total} ${noun}`}</span>
+      )}
+    </div>
+  );
+}
+
 export function Tabs<T extends string>({ tabs, value, onChange }: { tabs: { value: T; label: ReactNode }[]; value: T; onChange: (v: T) => void }) {
   return (
     <div role="tablist" className="inline-flex rounded-lg border border-line bg-paper p-0.5">

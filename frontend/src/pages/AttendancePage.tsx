@@ -3,9 +3,10 @@ import { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { Link } from 'react-router-dom';
 import { api, applyServerErrors, errorMessage } from '../api/client';
-import { Badge, Button, Card, DataTable, Field, Input, Modal, Note, PageHeader, Pagination, Stat, StatusBadge, Textarea, useConfirm, useToast } from '../components/ui';
+import { Badge, Button, Card, DataTable, Field, InfiniteLoader, Input, Modal, Note, PageHeader, Stat, StatusBadge, Textarea, useConfirm, useToast } from '../components/ui';
 import { defaultPeriod, Period, PeriodPicker, periodLabel, periodParams } from '../components/PeriodPicker';
 import { useFetch } from '../hooks/useFetch';
+import { useInfiniteFetch } from '../hooks/useInfiniteFetch';
 import type { AttendanceCorrection, AttendanceDay, AttendanceMonth, AttendanceStatus, AttendanceToday, WfhRequest } from '../types';
 import { days, formatDay, formatRange, todayString } from '../utils/date';
 import { CorrectionRequestForm, correctionRequestSchema, WfhForm, wfhSchema } from '../validations';
@@ -197,9 +198,9 @@ function CorrectionsCard({ reloadKey }: { reloadKey: number }) {
 function WfhCard({ onChange }: { onChange: () => void }) {
   const toast = useToast();
   const confirm = useConfirm();
-  const [page, setPage] = useState(1);
   const [applying, setApplying] = useState(false);
-  const { data, meta, loading, error, reload } = useFetch<WfhRequest[]>('/wfh/my', { page, limit: 5 });
+  const list = useInfiniteFetch<WfhRequest[]>('/wfh/my', {}, { limit: 10 });
+  const { data, meta, loading, error, reload } = list;
   const today = todayString();
   const changed = () => { void reload(); onChange(); };
 
@@ -230,7 +231,7 @@ function WfhCard({ onChange }: { onChange: () => void }) {
           { header: '', align: 'right', cell: (r) => ((r.status === 'PENDING' || (r.status === 'APPROVED' && r.endDate >= today)) ? <Button small onClick={() => cancel(r)}>Cancel</Button> : null) },
         ]}
       />
-      <Pagination meta={meta} onPage={setPage} />
+      <InfiniteLoader list={list} />
       {applying && <ApplyWfhModal onClose={() => setApplying(false)} onDone={() => { setApplying(false); changed(); }} />}
     </Card>
   );

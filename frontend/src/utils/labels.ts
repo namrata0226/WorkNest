@@ -51,7 +51,7 @@ export const titleCase = (text: string) => text.toLowerCase().replace(/_/g, ' ')
 export const PERMISSION_LABEL: Record<string, string> = {
   'employees:read': 'View employees',
   'employees:write': 'Manage employees',
-  'org:manage': 'Manage departments and locations',
+  'org:manage': 'Manage teams and locations',
   'leave:read_all': 'View all leave',
   'leave:approve': 'Approve leave',
   'leave_policy:manage': 'Manage leave types and policies',

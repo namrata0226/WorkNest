@@ -2,8 +2,9 @@ import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { api, errorMessage } from '../api/client';
 import { PersonAvatar } from '../components/Avatar';
-import { Badge, Button, Card, Column, DataTable, Field, Loading, Modal, Note, PageHeader, Pagination, StatusBadge, Textarea, TypeTag, useToast } from '../components/ui';
+import { Badge, Button, Card, Column, DataTable, Field, InfiniteLoader, Loading, Modal, Note, PageHeader, StatusBadge, Textarea, TypeTag, useToast } from '../components/ui';
 import { useFetch } from '../hooks/useFetch';
+import { useInfiniteFetch } from '../hooks/useInfiniteFetch';
 import type { AttendanceCorrection, ExpenseClaim, LeaveRequest, PersonRef, WfhRequest } from '../types';
 import { formatDate, formatDateTime, formatRange } from '../utils/date';
 import { titleCase } from '../utils/labels';
@@ -15,8 +16,8 @@ const VIEW = 'ALL';
 
 export function ApprovalsPage() {
   const [params, setParams] = useSearchParams();
-  const [page, setPage] = useState(1);
-  const { data, meta, loading, error, reload } = useFetch<LeaveRequest[]>('/approvals/pending', { page, limit: 20, view: VIEW });
+  const list = useInfiniteFetch<LeaveRequest[]>('/approvals/pending', { view: VIEW }, { limit: 20 });
+  const { data, meta, loading, error, reload } = list;
   const openId = params.get('request');
   const close = () => setParams({}, { replace: true });
 
@@ -41,7 +42,7 @@ export function ApprovalsPage() {
             { header: 'Applied', cell: (r) => formatDateTime(r.createdAt), className: 'text-muted whitespace-nowrap' },
           ]}
         />
-        <Pagination meta={meta} onPage={setPage} />
+        <InfiniteLoader list={list} />
       </Card>
       {openId && <DecisionModal id={openId} onClose={close} onDone={() => { close(); void reload(); }} />}
     </>
@@ -59,7 +60,7 @@ type Person = { employee: PersonRef };
 const personCell = (r: Person) => (typeof r.employee === 'string' ? '—' : (
   <div className="flex items-center gap-2.5">
     <PersonAvatar person={r.employee} />
-    <div><div className="font-medium">{r.employee.fullName}</div><div className="text-xs text-muted">{r.employee.employeeId} · {r.employee.department?.name ?? 'No department'}</div></div>
+    <div><div className="font-medium">{r.employee.fullName}</div><div className="text-xs text-muted">{r.employee.employeeId} · {r.employee.department?.name ?? 'No team'}</div></div>
   </div>
 ));
 

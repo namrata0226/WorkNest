@@ -1,9 +1,10 @@
 import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api, errorMessage } from '../api/client';
-import { Button, Card, DataTable, Field, Loading, Modal, Note, PageHeader, Pagination, Select, StatusBadge, Textarea, TypeTag, useConfirm, useToast } from '../components/ui';
+import { Button, Card, DataTable, Field, InfiniteLoader, Loading, Modal, Note, PageHeader, Select, StatusBadge, Textarea, TypeTag, useConfirm, useToast } from '../components/ui';
 import { useAuth } from '../context/AuthContext';
 import { useFetch } from '../hooks/useFetch';
+import { useInfiniteFetch } from '../hooks/useInfiniteFetch';
 import type { LeaveRequest } from '../types';
 import { days, formatDateTime, formatDay, formatRange } from '../utils/date';
 import { STATUS_LABEL } from '../utils/labels';
@@ -11,14 +12,14 @@ import { STATUS_LABEL } from '../utils/labels';
 export function MyLeavesPage() {
   const navigate = useNavigate();
   const [status, setStatus] = useState('');
-  const [page, setPage] = useState(1);
-  const { data, meta, loading, error } = useFetch<LeaveRequest[]>('/leaves/my', { status, page, limit: 15, sort: 'createdAt', order: 'desc' });
+  const list = useInfiniteFetch<LeaveRequest[]>('/leaves/my', { status, sort: 'createdAt', order: 'desc' }, { limit: 15 });
+  const { data, meta, loading, error } = list;
 
   return (
     <>
       <PageHeader title="My requests" subtitle="Everything you have applied for" actions={<Link to="/apply"><Button variant="primary">Apply for leave</Button></Link>} />
       <div className="mb-3 max-w-52">
-        <Select aria-label="Filter by status" value={status} onChange={(e) => { setStatus(e.target.value); setPage(1); }}>
+        <Select aria-label="Filter by status" value={status} onChange={(e) => { setStatus(e.target.value); }}>
           <option value="">All statuses</option>
           {Object.entries(STATUS_LABEL).filter(([k]) => !['ACTIVE', 'ON_NOTICE', 'INACTIVE', 'WAITING'].includes(k)).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
         </Select>
@@ -39,7 +40,7 @@ export function MyLeavesPage() {
             { header: 'Status', cell: (r) => <StatusBadge status={r.status} /> },
           ]}
         />
-        <Pagination meta={meta} onPage={setPage} />
+        <InfiniteLoader list={list} />
       </Card>
     </>
   );
@@ -49,7 +50,7 @@ export function MyLeavesPage() {
 export function LeaveSummary({ request }: { request: LeaveRequest }) {
   const rows: [string, React.ReactNode][] = [
     ['Employee', `${request.employee.fullName} (${request.employee.employeeId})`],
-    ['Department', request.employee.department?.name ?? '—'],
+    ['Team', request.employee.department?.name ?? '—'],
     ['Leave type', <TypeTag key="t" type={request.leaveType} />],
     ['Dates', formatRange(request.startDate, request.endDate)],
     ['Duration', `${days(request.totalDays)}${request.dayType === 'HALF' ? ` (${request.halfSession === 'FIRST' ? 'first' : 'second'} half)` : ''}`],

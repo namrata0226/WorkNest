@@ -1,7 +1,7 @@
 import { useState } from 'react';
-import { Badge, Card, DataTable, Input, Note, PageHeader, Pagination, Select } from '../../components/ui';
+import { Badge, Card, DataTable, InfiniteLoader, Input, Note, PageHeader, Select } from '../../components/ui';
 import { useAuth } from '../../context/AuthContext';
-import { useFetch } from '../../hooks/useFetch';
+import { useInfiniteFetch } from '../../hooks/useInfiniteFetch';
 import { formatDateTime } from '../../utils/date';
 import { ROLE_LABEL, titleCase } from '../../utils/labels';
 
@@ -23,25 +23,25 @@ export function AuditPage() {
   const [category, setCategory] = useState('');
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
-  const [page, setPage] = useState(1);
   const systemWide = can('audit:read_system');
-  const { data, meta, loading, error } = useFetch<AuditRow[]>('/audit-logs', { search, category, from, to, page, limit: 30 });
+  const list = useInfiniteFetch<AuditRow[]>('/audit-logs', { search, category, from, to }, { limit: 30 });
+  const { data, meta, loading, error } = list;
 
   return (
     <>
       <PageHeader title="Audit log" subtitle={systemWide ? 'All HR, security and system events' : 'HR activity'} />
       <div className="mb-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-        <Input aria-label="Search" placeholder="Search action, person or summary" value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }} />
+        <Input aria-label="Search" placeholder="Search action, person or summary" value={search} onChange={(e) => { setSearch(e.target.value); }} />
         {systemWide && (
-          <Select aria-label="Category" value={category} onChange={(e) => { setCategory(e.target.value); setPage(1); }}>
+          <Select aria-label="Category" value={category} onChange={(e) => { setCategory(e.target.value); }}>
             <option value="">All categories</option>
             <option value="HR">HR</option>
             <option value="SECURITY">Security</option>
             <option value="SYSTEM">System</option>
           </Select>
         )}
-        <Input aria-label="From" type="date" value={from} onChange={(e) => { setFrom(e.target.value); setPage(1); }} />
-        <Input aria-label="To" type="date" value={to} onChange={(e) => { setTo(e.target.value); setPage(1); }} />
+        <Input aria-label="From" type="date" value={from} onChange={(e) => { setFrom(e.target.value); }} />
+        <Input aria-label="To" type="date" value={to} onChange={(e) => { setTo(e.target.value); }} />
       </div>
       {error && <Note>{error}</Note>}
       <Card flush>
@@ -58,7 +58,7 @@ export function AuditPage() {
             { header: 'Category', cell: (r) => <Badge tone={r.category === 'SECURITY' ? 'rose' : r.category === 'SYSTEM' ? 'sky' : 'gray'}>{r.category}</Badge> },
           ]}
         />
-        <Pagination meta={meta} onPage={setPage} />
+        <InfiniteLoader list={list} />
       </Card>
     </>
   );

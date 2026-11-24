@@ -1,11 +1,12 @@
 import { ClientSession, Types } from 'mongoose';
-import { ACTIVE_LEAVE_STATUSES, ApproverType, LEAVE_STATUS, PERMISSIONS } from '../constants';
+import { ACTIVE_LEAVE_STATUSES, ApproverType, LEAVE_STATUS, PERMISSIONS, ROLES } from '../constants';
 import { AuthContext, can } from '../middleware/auth';
 import { Employee, IEmployee } from '../models/Employee';
 import { ApprovalWorkflow, IApprovalWorkflow, ILeaveType, LeaveType } from '../models/LeaveConfig';
 import { LeaveBalance } from '../models/LeaveLedger';
 import { ApprovalStep, ILeaveRequest, LeaveRequest } from '../models/LeaveRequest';
 import { StoredFile } from '../models/System';
+import { IUser, User } from '../models/User';
 import { diffDays } from '../utils/dates';
 import { AppError, conflict, ErrorDetail, forbidden, notFound, unprocessable } from '../utils/errors';
 import { isDuplicateKeyError, withTransaction } from '../utils/transaction';
@@ -254,6 +255,16 @@ async function settleApproval(request: ILeaveRequest, e: { type: ILeaveType; rul
   return update;
 }
 
+/**
+ * A Super Admin with nobody above them has no one to approve their leave, so it is approved automatically.
+ * Giving them a reporting manager puts their leave back through approval.
+ */
+async function isTopOfHierarchy(employee: IEmployee): Promise<boolean> {
+  if (employee.reportingManager || !employee.user) return false;
+  const user = await User.findById(employee.user).select('role').lean<IUser>();
+  return user?.role === ROLES.SUPER_ADMIN;
+}
+
 export async function applyLeave(ctx: RequestContext, employeeId: Types.ObjectId, input: LeaveInput, idempotencyKey?: string) {
   if (idempotencyKey) {
     const replay = await LeaveRequest.findOne({ employee: employeeId, idempotencyKey }).lean<ILeaveRequest>();
@@ -261,9 +272,10 @@ export async function applyLeave(ctx: RequestContext, employeeId: Types.ObjectId
   }
 
   const e = await evaluateLeave(employeeId, input);
+  const topOfHierarchy = await isTopOfHierarchy(e.employee);
   const issues = [...e.issues];
   // An approver needs a reason to decide on. Leave approved automatically has no approver.
-  if (e.rule.requiresApproval && !input.reason) issues.push({ path: 'reason', message: 'A reason is required' });
+  if (e.rule.requiresApproval && !topOfHierarchy && !input.reason) issues.push({ path: 'reason', message: 'A reason is required' });
   if (e.documentRequired && !input.document) issues.push({ path: 'document', message: `A supporting document is required for this ${e.type.name} request` });
   if (input.document) {
     const file = await StoredFile.exists({ _id: input.document, owner: ctx.auth?.userId, purpose: { $nin: ['AVATAR', 'PERSONAL'] } });
@@ -278,7 +290,7 @@ export async function applyLeave(ctx: RequestContext, employeeId: Types.ObjectId
 
   const settings = await getSettings();
   const steps = buildSteps(await resolveWorkflow(e.type._id), e.employee);
-  const autoApprove = !e.rule.requiresApproval;
+  const autoApprove = !e.rule.requiresApproval || topOfHierarchy;
 
   try {
     const request = await withTransaction(async (session) => {

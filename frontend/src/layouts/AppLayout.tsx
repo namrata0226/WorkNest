@@ -76,6 +76,10 @@ export function AppLayout() {
 
   const nav = visibleNav({ can, isEmployee: Boolean(user?.employee), isManager: Boolean(user?.isManager), isApprover });
   const current = sectionFor(nav, location.pathname);
+  // Pages reached from the header rather than the menu, so the header shows where you are.
+  const onNotifications = location.pathname.startsWith('/notifications');
+  const onAccount = location.pathname.startsWith('/account');
+  const headerTitle = current?.label ?? (onNotifications ? 'Notifications' : onAccount ? 'My account' : null);
 
   const name = user?.employee?.fullName ?? user?.email ?? '';
   const activeTab = current?.tabs.find((t) => tabMatches(t, location.pathname));
@@ -111,7 +115,7 @@ export function AppLayout() {
       </div>
       <div className="border-t border-white/10 p-3">
         <div className="flex items-center gap-2.5 rounded-lg px-2 py-2">
-          <Link to="/account" className="flex min-w-0 flex-1 items-center gap-2.5 rounded-md hover:text-white" aria-label="My account">
+          <Link to="/account" aria-current={onAccount ? 'page' : undefined} className={`-mx-1 flex min-w-0 flex-1 items-center gap-2.5 rounded-md px-1 py-0.5 hover:text-white ${onAccount ? 'bg-white/10 text-white' : ''}`} aria-label="My account">
             <Avatar url={user?.avatarUrl} name={name} />
             <span className="min-w-0">
               <span className="block truncate text-[13px] font-medium text-white">{name}</span>
@@ -144,10 +148,10 @@ export function AppLayout() {
             <button type="button" aria-label="Open menu" className="rounded-lg p-1.5 text-muted hover:bg-paper md:hidden" onClick={() => setOpen(true)}>
               <Icon name="menu" />
             </button>
-            {current && (
+            {headerTitle && (
               <div className="flex min-w-0 items-center gap-1.5 text-[13px]">
-                <span className="font-semibold text-ink">{current.label}</span>
-                {activeTab && current.tabs.length > 1 && (
+                <span className="font-semibold text-ink">{headerTitle}</span>
+                {current && activeTab && current.tabs.length > 1 && (
                   <>
                     <span aria-hidden className="text-faint">/</span>
                     <span className="truncate text-muted">{activeTab.label}</span>
@@ -157,11 +161,17 @@ export function AppLayout() {
             )}
           </div>
           <div className="flex items-center gap-1">
-            <Link to="/notifications" aria-label={`Notifications, ${unreadCount} unread`} title="Notifications" className="relative rounded-lg p-2 text-muted hover:bg-paper hover:text-ink">
+            <Link
+              to="/notifications"
+              aria-label={`Notifications, ${unreadCount} unread`}
+              aria-current={onNotifications ? 'page' : undefined}
+              title="Notifications"
+              className={`relative rounded-lg p-2 transition-colors ${onNotifications ? 'bg-brand-soft text-brand ring-1 ring-brand/25' : 'text-muted hover:bg-paper hover:text-ink'}`}
+            >
               <Icon name="bell" />
               {unreadCount > 0 && <span className="tnum absolute -right-0.5 -top-0.5 min-w-[18px] rounded-full border-2 border-surface bg-rose px-1 text-center text-[10px] font-semibold leading-[14px] text-white">{unreadCount > 99 ? '99+' : unreadCount}</span>}
             </Link>
-            <Link to="/account" aria-label="My account" className="ml-1 flex items-center gap-2 rounded-lg px-1.5 py-1 text-[13px] text-muted hover:bg-paper md:hidden">
+            <Link to="/account" aria-label="My account" aria-current={onAccount ? 'page' : undefined} className={`ml-1 flex items-center gap-2 rounded-lg px-1.5 py-1 text-[13px] text-muted hover:bg-paper md:hidden ${onAccount ? 'bg-brand-soft ring-1 ring-brand/25' : ''}`}>
               <Avatar url={user?.avatarUrl} name={name} />
             </Link>
             <button type="button" title="Sign out" aria-label="Sign out" disabled={signingOut} onClick={() => void signOut()} className="rounded-lg p-2 text-muted hover:bg-paper hover:text-ink disabled:opacity-50 md:hidden">

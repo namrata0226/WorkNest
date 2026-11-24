@@ -10,6 +10,7 @@ import { useAuth } from '../context/AuthContext';
 import { AuthLayout } from '../layouts/AppLayout';
 import { uploadAvatar } from '../services/download';
 import { SelfService } from './SelfServicePage';
+import { EmployeeFormModal } from './admin/EmployeesPage';
 import { formatDate } from '../utils/date';
 import type { Employee } from '../types';
 import { ROLE_LABEL, titleCase } from '../utils/labels';
@@ -147,7 +148,8 @@ function EditProfileModal({ employee, onClose, onSaved }: { employee: Employee; 
       <form id="profile-form" className="space-y-3" onSubmit={handleSubmit(onSubmit)} noValidate>
         {formError && <Note>{formError}</Note>}
         <Field label="Full name" required error={errors.fullName?.message}><Input {...register('fullName')} /></Field>
-        <Field label="Phone" error={errors.phone?.message}><Input {...register('phone')} /></Field>
+        <Field label="Phone" error={errors.phone?.message}><Input type="tel" autoComplete="tel" {...register('phone')} /></Field>
+        <p className="text-xs text-muted">Ask HR to change anything else, including your email, gender or team.</p>
       </form>
     </Modal>
   );
@@ -195,7 +197,9 @@ function ProfilePhoto() {
 }
 
 export function AccountPage() {
-  const { user, refreshProfile } = useAuth();
+  const { user, refreshProfile, can } = useAuth();
+  // People who manage employees can already change every detail on the People page, including their own.
+  const canEditAll = can('employees:write');
   const toast = useToast();
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
@@ -217,14 +221,14 @@ export function AccountPage() {
   const rows: [string, React.ReactNode][] = e
     ? [
         ['Employee ID', e.employeeId], ['Name', e.fullName], ['Email', e.email], ['Phone', e.phone ?? '—'], ['Gender', e.gender ? titleCase(e.gender) : 'Not recorded'],
-        ['Department', e.department?.name ?? '—'], ['Designation', e.designation ?? '—'], ['Reporting manager', e.reportingManager?.fullName ?? '—'],
+        ['Team', e.department?.name ?? '—'], ['Designation', e.designation ?? '—'], ['Reporting manager', e.reportingManager?.fullName ?? '—'],
         ['Location', e.location?.name ?? '—'], ['Joined', formatDate(e.joiningDate)], ['Status', <StatusBadge key="s" status={e.employmentStatus} />],
       ]
     : [['Email', user?.email], ['Role', ROLE_LABEL[user?.role ?? ''] ?? user?.role]];
 
   return (
     <>
-      <PageHeader title="My account" subtitle={e ? 'You can update your name and phone. Ask HR to correct anything else, including your gender or email.' : 'Ask HR to correct anything here.'} />
+      <PageHeader title="My account" subtitle={e ? (canEditAll ? 'You can update all of your details.' : 'You can update your name and phone. Ask HR to correct anything else, including your gender or email.') : 'Ask HR to correct anything here.'} />
       {user?.mustChangePassword && <div className="mb-4"><Note tone="amber">Change your temporary password to continue using WorkNest.</Note></div>}
       <div className="grid gap-4 lg:grid-cols-2">
         <Card title="Profile" actions={e && <Button small onClick={() => setEditing(true)}>Edit profile</Button>}>
@@ -249,7 +253,14 @@ export function AccountPage() {
         </Card>
       </div>
       {e && <SelfService />}
-      {editing && e && (
+      {editing && e && canEditAll && (
+        <EmployeeFormModal
+          employee={e as Employee}
+          onClose={() => setEditing(false)}
+          onSaved={async () => { await refreshProfile(); setEditing(false); toast('Profile updated'); }}
+        />
+      )}
+      {editing && e && !canEditAll && (
         <EditProfileModal
           employee={e}
           onClose={() => setEditing(false)}
