@@ -3,13 +3,13 @@ import { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { api, applyServerErrors, errorMessage } from '../api/client';
 import { AttachedDocument, DocumentUpload } from '../components/DocumentUpload';
-import { Button, Card, DataTable, Field, Input, Modal, Note, PageHeader, Pagination, Select, StatusBadge, Textarea, useToast } from '../components/ui';
-import { useFetch } from '../hooks/useFetch';
+import { Button, Card, cx, DataTable, Field, InfiniteLoader, Input, Modal, Note, PageHeader, Select, StatusBadge, Textarea, useConfirm, useToast } from '../components/ui';
+import { useInfiniteFetch } from '../hooks/useInfiniteFetch';
 import { downloadFile } from '../services/download';
 import type { ExpenseClaim } from '../types';
 import { formatDate, todayString } from '../utils/date';
 import { EXPENSE_CATEGORIES, titleCase } from '../utils/labels';
-import { ExpenseForm, expenseSchema } from '../validations';
+import { EXPENSE_DESCRIPTION_MAX, EXPENSE_MAX_AMOUNT, ExpenseForm, expenseSchema } from '../validations';
 
 export const money = (n: number) => n.toLocaleString('en-IN', { style: 'currency', currency: 'INR' });
 
@@ -20,15 +20,23 @@ export const ReceiptLink = ({ claim }: { claim: ExpenseClaim }) => {
   return <button type="button" className="text-brand hover:underline" onClick={(e) => { e.stopPropagation(); downloadFile(`/files/${_id}`, {}, originalName).catch((err) => toast(errorMessage(err), 'error')); }}>Receipt</button>;
 };
 
+/** "120 / 1000", turning red once the limit is passed. */
+export function CharCount({ length, max }: { length: number; max: number }) {
+  return <div aria-hidden className={cx('tnum mt-1 text-right text-[11px]', length > max ? 'font-medium text-rose' : 'text-faint')}>{length.toLocaleString('en-IN')} / {max.toLocaleString('en-IN')}</div>;
+}
+
 function NewClaimModal({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
   const toast = useToast();
   const [formError, setFormError] = useState<string | null>(null);
   const [receipt, setReceipt] = useState<AttachedDocument | null>(null);
   const [uploading, setUploading] = useState(false);
-  const { register, handleSubmit, setError, formState: { errors, isSubmitting } } = useForm<ExpenseForm>({
+  const { register, handleSubmit, setError, watch, formState: { errors, isSubmitting } } = useForm<ExpenseForm>({
     resolver: zodResolver(expenseSchema),
+    // Check as the person types, so hitting a limit shows its message straight away.
+    mode: 'onChange',
     defaultValues: { category: 'TRAVEL', expenseDate: todayString(), description: '' },
   });
+  const descriptionLength = (watch('description') ?? '').length;
   const onSubmit = async (v: ExpenseForm) => {
     setFormError(null);
     try {
@@ -45,8 +53,15 @@ function NewClaimModal({ onClose, onDone }: { onClose: () => void; onDone: () =>
         {formError && <div className="sm:col-span-2"><Note>{formError}</Note></div>}
         <Field label="Category" required error={errors.category?.message}><Select {...register('category')}>{EXPENSE_CATEGORIES.map((c) => <option key={c} value={c}>{titleCase(c)}</option>)}</Select></Field>
         <Field label="Date of expense" required error={errors.expenseDate?.message}><Input type="date" max={todayString()} {...register('expenseDate')} /></Field>
-        <Field label="Amount (₹)" required error={errors.amount?.message}><Input type="number" min="0" step="0.01" inputMode="decimal" {...register('amount', { valueAsNumber: true })} /></Field>
-        <div className="sm:col-span-2"><Field label="Description" required error={errors.description?.message}><Textarea rows={2} {...register('description')} /></Field></div>
+        <Field label="Amount (₹)" required error={errors.amount?.message} hint={`Up to ₹${EXPENSE_MAX_AMOUNT.toLocaleString('en-IN')}`}>
+          <Input type="number" min="0" max={EXPENSE_MAX_AMOUNT} step="0.01" inputMode="decimal" aria-invalid={Boolean(errors.amount)} {...register('amount', { valueAsNumber: true })} />
+        </Field>
+        <div className="sm:col-span-2">
+          <Field label="Description" required error={errors.description?.message}>
+            <Textarea rows={2} aria-invalid={Boolean(errors.description)} {...register('description')} />
+          </Field>
+          <CharCount length={descriptionLength} max={EXPENSE_DESCRIPTION_MAX} />
+        </div>
         <div className="sm:col-span-2"><DocumentUpload label="Receipt" value={receipt} onChange={setReceipt} onUploadingChange={setUploading} /></div>
       </form>
     </Modal>
@@ -55,10 +70,12 @@ function NewClaimModal({ onClose, onDone }: { onClose: () => void; onDone: () =>
 
 export function ExpensesPage() {
   const toast = useToast();
-  const [page, setPage] = useState(1);
+  const confirm = useConfirm();
   const [creating, setCreating] = useState(false);
-  const { data, meta, loading, error, reload } = useFetch<ExpenseClaim[]>('/expenses/my', { page, limit: 20 });
+  const list = useInfiniteFetch<ExpenseClaim[]>('/expenses/my', {}, { limit: 20 });
+  const { data, meta, loading, error, reload } = list;
   const cancel = async (c: ExpenseClaim) => {
+    if (!(await confirm({ title: 'Cancel this claim?', message: `Your ${money(c.amount)} claim for ${formatDate(c.expenseDate)} will be withdrawn. You can submit a new one later.`, confirmLabel: 'Cancel claim', cancelLabel: 'Keep claim', tone: 'danger' }))) return;
     try {
       await api.patch(`/expenses/${c._id}/cancel`, {});
       toast('Claim cancelled');
@@ -84,10 +101,10 @@ export function ExpensesPage() {
             { header: 'Amount', align: 'right', cell: (c) => money(c.amount), className: 'tnum' },
             { header: 'Receipt', cell: (c) => <ReceiptLink claim={c} /> },
             { header: 'Status', cell: (c) => <StatusBadge status={c.status} /> },
-            { header: '', align: 'right', cell: (c) => (c.status === 'PENDING' ? <Button small onClick={() => void cancel(c)}>Cancel</Button> : null) },
+            { header: '', align: 'right', cell: (c) => (c.status === 'PENDING' ? <Button small onClick={() => cancel(c)}>Cancel</Button> : null) },
           ]}
         />
-        <Pagination meta={meta} onPage={setPage} />
+        <InfiniteLoader list={list} />
       </Card>
       {creating && <NewClaimModal onClose={() => setCreating(false)} onDone={() => { setCreating(false); void reload(); }} />}
     </>

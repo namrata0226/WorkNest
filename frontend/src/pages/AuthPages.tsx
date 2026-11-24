@@ -1,15 +1,16 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useRef, useState } from 'react';
 import { useForm } from 'react-hook-form';
-import { Link, Navigate, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, Navigate, useNavigate, useSearchParams } from 'react-router-dom';
 import { z } from 'zod';
 import { api, applyServerErrors, errorMessage } from '../api/client';
 import { Avatar } from '../components/Avatar';
-import { Button, Card, Field, Input, Modal, Note, PageHeader, StatusBadge, useToast } from '../components/ui';
+import { Button, Card, Field, Input, Modal, Note, PageHeader, PasswordInput, StatusBadge, useConfirm, useToast } from '../components/ui';
 import { useAuth } from '../context/AuthContext';
 import { AuthLayout } from '../layouts/AppLayout';
 import { uploadAvatar } from '../services/download';
 import { SelfService } from './SelfServicePage';
+import { EmployeeFormModal } from './admin/EmployeesPage';
 import { formatDate } from '../utils/date';
 import type { Employee } from '../types';
 import { ROLE_LABEL, titleCase } from '../utils/labels';
@@ -17,12 +18,11 @@ import { changePasswordSchema, forgotSchema, LoginForm, loginSchema, ProfileForm
 
 export function LoginPage() {
   const { user, ready, login } = useAuth();
-  const location = useLocation();
   const [error, setError] = useState<string | null>(null);
   const { register, handleSubmit, formState: { errors, isSubmitting } } = useForm<LoginForm>({ resolver: zodResolver(loginSchema) });
 
-  // Signing in sets the user, so this is also what returns someone to the page they came for, such as an email link.
-  if (ready && user) return <Navigate to={(location.state as { from?: string } | null)?.from ?? '/'} replace />;
+  // Signing in sets the user, and every sign-in lands on the home screen, whatever page sent them here.
+  if (ready && user) return <Navigate to="/" replace />;
 
   const onSubmit = async (values: LoginForm) => {
     setError(null);
@@ -41,7 +41,7 @@ export function LoginPage() {
           <Input type="email" autoComplete="username" autoFocus {...register('email')} />
         </Field>
         <Field label="Password" error={errors.password?.message}>
-          <Input type="password" autoComplete="current-password" {...register('password')} />
+          <PasswordInput autoComplete="current-password" {...register('password')} />
         </Field>
         <Button type="submit" variant="primary" className="w-full" loading={isSubmitting}>Sign in</Button>
         <p className="text-center text-xs"><Link className="text-brand hover:underline" to="/forgot-password">Forgot your password?</Link></p>
@@ -108,10 +108,10 @@ export function ResetPasswordPage() {
         <form className="space-y-3" onSubmit={handleSubmit(onSubmit)} noValidate>
           {error && <Note>{error}</Note>}
           <Field label="New password" hint="At least 10 characters, with a letter and a number" error={errors.password?.message}>
-            <Input type="password" autoComplete="new-password" autoFocus {...register('password')} />
+            <PasswordInput autoComplete="new-password" autoFocus {...register('password')} />
           </Field>
           <Field label="Confirm password" error={errors.confirm?.message}>
-            <Input type="password" autoComplete="new-password" {...register('confirm')} />
+            <PasswordInput autoComplete="new-password" {...register('confirm')} />
           </Field>
           <Button type="submit" variant="primary" className="w-full" loading={isSubmitting}>Save password</Button>
         </form>
@@ -148,7 +148,8 @@ function EditProfileModal({ employee, onClose, onSaved }: { employee: Employee; 
       <form id="profile-form" className="space-y-3" onSubmit={handleSubmit(onSubmit)} noValidate>
         {formError && <Note>{formError}</Note>}
         <Field label="Full name" required error={errors.fullName?.message}><Input {...register('fullName')} /></Field>
-        <Field label="Phone" error={errors.phone?.message}><Input {...register('phone')} /></Field>
+        <Field label="Phone" error={errors.phone?.message}><Input type="tel" autoComplete="tel" {...register('phone')} /></Field>
+        <p className="text-xs text-muted">Ask HR to change anything else, including your email, gender or team.</p>
       </form>
     </Modal>
   );
@@ -157,9 +158,14 @@ function EditProfileModal({ employee, onClose, onSaved }: { employee: Employee; 
 function ProfilePhoto() {
   const { user, refreshProfile } = useAuth();
   const toast = useToast();
+  const confirm = useConfirm();
   const [busy, setBusy] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const hasPhoto = Boolean(user?.avatarUrl);
+  const removePhoto = async () => {
+    if (!(await confirm({ title: 'Remove your profile photo?', message: 'Your initials will show instead. You can add a new photo at any time.', confirmLabel: 'Remove photo', tone: 'danger' }))) return;
+    await run(() => api.delete('/me/avatar'), 'Profile photo removed');
+  };
 
   const run = async (work: () => Promise<unknown>, done: string) => {
     setBusy(true);
@@ -182,7 +188,7 @@ function ProfilePhoto() {
         <input ref={fileRef} type="file" accept="image/png,image/jpeg" hidden aria-label="Choose a profile photo" onChange={(ev) => { const file = ev.target.files?.[0]; if (file) void run(() => uploadAvatar(file), hasPhoto ? 'Profile photo changed' : 'Profile photo added'); }} />
         <div className="flex flex-wrap gap-2">
           <Button small loading={busy} onClick={() => fileRef.current?.click()}>{hasPhoto ? 'Change photo' : 'Add photo'}</Button>
-          {hasPhoto && <Button small disabled={busy} onClick={() => void run(() => api.delete('/me/avatar'), 'Profile photo removed')}>Remove photo</Button>}
+          {hasPhoto && <Button small disabled={busy} onClick={() => removePhoto()}>Remove photo</Button>}
         </div>
         <p className="mt-1.5 text-xs text-faint">PNG or JPEG, up to 2 MB</p>
       </div>
@@ -191,7 +197,9 @@ function ProfilePhoto() {
 }
 
 export function AccountPage() {
-  const { user, refreshProfile } = useAuth();
+  const { user, refreshProfile, can } = useAuth();
+  // People who manage employees can already change every detail on the People page, including their own.
+  const canEditAll = can('employees:write');
   const toast = useToast();
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
@@ -213,14 +221,14 @@ export function AccountPage() {
   const rows: [string, React.ReactNode][] = e
     ? [
         ['Employee ID', e.employeeId], ['Name', e.fullName], ['Email', e.email], ['Phone', e.phone ?? '—'], ['Gender', e.gender ? titleCase(e.gender) : 'Not recorded'],
-        ['Department', e.department?.name ?? '—'], ['Designation', e.designation ?? '—'], ['Reporting manager', e.reportingManager?.fullName ?? '—'],
+        ['Team', e.department?.name ?? '—'], ['Designation', e.designation ?? '—'], ['Reporting manager', e.reportingManager?.fullName ?? '—'],
         ['Location', e.location?.name ?? '—'], ['Joined', formatDate(e.joiningDate)], ['Status', <StatusBadge key="s" status={e.employmentStatus} />],
       ]
     : [['Email', user?.email], ['Role', ROLE_LABEL[user?.role ?? ''] ?? user?.role]];
 
   return (
     <>
-      <PageHeader title="My account" subtitle={e ? 'You can update your name and phone. Ask HR to correct anything else, including your gender or email.' : 'Ask HR to correct anything here.'} />
+      <PageHeader title="My account" subtitle={e ? (canEditAll ? 'You can update all of your details.' : 'You can update your name and phone. Ask HR to correct anything else, including your gender or email.') : 'Ask HR to correct anything here.'} />
       {user?.mustChangePassword && <div className="mb-4"><Note tone="amber">Change your temporary password to continue using WorkNest.</Note></div>}
       <div className="grid gap-4 lg:grid-cols-2">
         <Card title="Profile" actions={e && <Button small onClick={() => setEditing(true)}>Edit profile</Button>}>
@@ -237,15 +245,22 @@ export function AccountPage() {
         <Card title="Change password">
           <form className="space-y-3" onSubmit={handleSubmit(onSubmit)} noValidate>
             {error && <Note>{error}</Note>}
-            <Field label="Current password" error={errors.currentPassword?.message}><Input type="password" autoComplete="current-password" {...register('currentPassword')} /></Field>
-            <Field label="New password" hint="At least 10 characters, with a letter and a number" error={errors.newPassword?.message}><Input type="password" autoComplete="new-password" {...register('newPassword')} /></Field>
-            <Field label="Confirm password" error={errors.confirm?.message}><Input type="password" autoComplete="new-password" {...register('confirm')} /></Field>
+            <Field label="Current password" error={errors.currentPassword?.message}><PasswordInput autoComplete="current-password" {...register('currentPassword')} /></Field>
+            <Field label="New password" hint="At least 10 characters, with a letter and a number" error={errors.newPassword?.message}><PasswordInput autoComplete="new-password" {...register('newPassword')} /></Field>
+            <Field label="Confirm password" error={errors.confirm?.message}><PasswordInput autoComplete="new-password" {...register('confirm')} /></Field>
             <Button type="submit" variant="primary" loading={isSubmitting}>Change password</Button>
           </form>
         </Card>
       </div>
       {e && <SelfService />}
-      {editing && e && (
+      {editing && e && canEditAll && (
+        <EmployeeFormModal
+          employee={e as Employee}
+          onClose={() => setEditing(false)}
+          onSaved={async () => { await refreshProfile(); setEditing(false); toast('Profile updated'); }}
+        />
+      )}
+      {editing && e && !canEditAll && (
         <EditProfileModal
           employee={e}
           onClose={() => setEditing(false)}

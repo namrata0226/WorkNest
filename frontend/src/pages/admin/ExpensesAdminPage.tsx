@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { api, errorMessage } from '../../api/client';
-import { Button, Card, DataTable, Note, PageHeader, Select, StatusBadge, useToast } from '../../components/ui';
+import { Button, Card, DataTable, Note, PageHeader, Select, StatusBadge, useConfirm, useToast } from '../../components/ui';
 import { useFetch } from '../../hooks/useFetch';
 import type { ExpenseClaim } from '../../types';
 import { formatDate } from '../../utils/date';
@@ -9,9 +9,13 @@ import { money, ReceiptLink } from '../ExpensesPage';
 
 export function ExpensesAdminPage() {
   const toast = useToast();
-  const [status, setStatus] = useState('APPROVED');
+  const confirm = useConfirm();
+  // Full history by default; filter to Approved to find claims still to pay.
+  const [status, setStatus] = useState('');
   const { data, loading, error, reload } = useFetch<ExpenseClaim[]>('/expenses', { status });
   const pay = async (c: ExpenseClaim) => {
+    const who = typeof c.employee === 'string' ? 'this employee' : c.employee.fullName;
+    if (!(await confirm({ title: 'Mark this claim as paid?', message: `${money(c.amount)} to ${who}. This cannot be undone.`, confirmLabel: 'Mark as paid' }))) return;
     try {
       await api.patch(`/expenses/${c._id}/pay`, {});
       toast('Marked as paid');
@@ -46,7 +50,7 @@ export function ExpensesAdminPage() {
             { header: 'Amount', align: 'right', cell: (c) => money(c.amount), className: 'tnum' },
             { header: 'Receipt', cell: (c) => <ReceiptLink claim={c} /> },
             { header: 'Status', cell: (c) => <StatusBadge status={c.status} /> },
-            { header: '', align: 'right', cell: (c) => (c.status === 'APPROVED' ? <Button small variant="primary" onClick={() => void pay(c)}>Mark as paid</Button> : null) },
+            { header: '', align: 'right', cell: (c) => (c.status === 'APPROVED' ? <Button small variant="primary" onClick={() => pay(c)}>Mark as paid</Button> : null) },
           ]}
         />
       </Card>

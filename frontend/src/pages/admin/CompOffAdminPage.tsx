@@ -2,8 +2,9 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { useEffect, useRef, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { api, applyServerErrors, errorMessage } from '../../api/client';
-import { Button, Card, Checkbox, DataTable, Field, Input, Modal, Note, PageHeader, Pagination, Select, StatusBadge, Tabs, Textarea, useToast } from '../../components/ui';
+import { Button, Card, Checkbox, DataTable, Field, InfiniteLoader, Input, Modal, Note, PageHeader, Select, StatusBadge, Tabs, Textarea, usePrompt, useSingleFlight, useToast } from '../../components/ui';
 import { useFetch } from '../../hooks/useFetch';
+import { useInfiniteFetch } from '../../hooks/useInfiniteFetch';
 import type { CompOffRequest, CompOffTx, Employee } from '../../types';
 import { formatDate, formatDateTime } from '../../utils/date';
 import { LEDGER_LABEL } from '../../utils/labels';
@@ -36,17 +37,18 @@ export function CompOffAdminPage() {
 }
 
 function RequestsTab() {
-  const [status, setStatus] = useState('PENDING');
+  // All statuses by default, so a request stays listed, with its outcome, after it is decided.
+  const [status, setStatus] = useState('');
   const [search, setSearch] = useState('');
-  const [page, setPage] = useState(1);
   const [deciding, setDeciding] = useState<CompOffRequest | null>(null);
-  const { data, meta, loading, error, reload } = useFetch<CompOffRequest[]>('/compoff', { status, search, page, limit: 20, sort: 'createdAt', order: status === 'PENDING' ? 'asc' : 'desc' });
+  const list = useInfiniteFetch<CompOffRequest[]>('/compoff', { status, search, sort: 'createdAt', order: status === 'PENDING' ? 'asc' : 'desc' }, { limit: 20 });
+  const { data, meta, loading, error, reload } = list;
 
   return (
     <>
       <div className="mb-3 grid gap-2 sm:grid-cols-3">
-        <Input aria-label="Search" placeholder="Search name or ID" value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }} />
-        <Select aria-label="Status" value={status} onChange={(e) => { setStatus(e.target.value); setPage(1); }}>
+        <Input aria-label="Search" placeholder="Search name or ID" value={search} onChange={(e) => { setSearch(e.target.value); }} />
+        <Select aria-label="Status" value={status} onChange={(e) => { setStatus(e.target.value); }}>
           <option value="">All statuses</option>
           <option value="PENDING">Pending</option>
           <option value="APPROVED">Approved</option>
@@ -70,7 +72,7 @@ function RequestsTab() {
             { header: 'Status', cell: (r) => (r.status === 'PENDING' ? <Button small variant="primary" onClick={() => setDeciding(r)}>Review</Button> : <StatusBadge status={r.status} />) },
           ]}
         />
-        <Pagination meta={meta} onPage={setPage} />
+        <InfiniteLoader list={list} />
       </Card>
       {deciding && <DecideModal request={deciding} onClose={() => setDeciding(null)} onDone={() => { setDeciding(null); void reload(); }} />}
     </>
@@ -105,8 +107,8 @@ function DecideModal({ request, onClose, onDone }: { request: CompOffRequest; on
       onClose={onClose}
       footer={
         <>
-          <Button variant="danger" loading={busy} disabled={!comment.trim()} title={comment.trim() ? undefined : 'Enter a reason to reject'} onClick={() => void decide(false)}>Reject</Button>
-          <Button variant="primary" loading={busy} onClick={() => void decide(true)}>Approve and credit</Button>
+          <Button variant="danger" loading={busy} disabled={!comment.trim()} title={comment.trim() ? undefined : 'Enter a reason to reject'} onClick={() => decide(false)}>Reject</Button>
+          <Button variant="primary" loading={busy} onClick={() => decide(true)}>Approve and credit</Button>
         </>
       }
     >
@@ -123,14 +125,23 @@ function DecideModal({ request, onClose, onDone }: { request: CompOffRequest; on
 
 function RecordsTab() {
   const toast = useToast();
+  const prompt = usePrompt();
   const [employee, setEmployee] = useState('');
-  const [page, setPage] = useState(1);
   const employees = useFetch<Employee[]>('/employees', { limit: 200, sort: 'fullName', order: 'asc' });
-  const { data, meta, loading, error, reload } = useFetch<CompOffTx[]>('/compoff/transactions', { employee, page, limit: 25 });
+  const list = useInfiniteFetch<CompOffTx[]>('/compoff/transactions', { employee }, { limit: 25 });
+  const { data, meta, loading, error, reload } = list;
 
-  const changeExpiry = async (t: CompOffTx) => {
-    const next = window.prompt('New expiry date (YYYY-MM-DD)', t.expiresOn ?? '');
-    if (!next) return;
+  const [changeExpiry] = useSingleFlight(async (t: CompOffTx) => {
+    const next = await prompt({
+      title: 'Change expiry date',
+      message: `${t.employee?.fullName ?? 'This credit'}: ${t.remaining} day(s) left.`,
+      label: 'New expiry date',
+      type: 'date',
+      defaultValue: t.expiresOn ?? '',
+      required: true,
+      confirmLabel: 'Save date',
+    });
+    if (!next || next === t.expiresOn) return;
     try {
       await api.patch(`/compoff/credits/${t._id}/expiry`, { expiresOn: next });
       toast('Expiry updated');
@@ -138,12 +149,12 @@ function RecordsTab() {
     } catch (err) {
       toast(errorMessage(err), 'error');
     }
-  };
+  });
 
   return (
     <>
       <div className="mb-3 max-w-sm">
-        <Select aria-label="Employee" value={employee} onChange={(e) => { setEmployee(e.target.value); setPage(1); }}>
+        <Select aria-label="Employee" value={employee} onChange={(e) => { setEmployee(e.target.value); }}>
           <option value="">All employees</option>
           {employees.data?.map((e) => <option key={e._id} value={e._id}>{e.fullName} ({e.employeeId})</option>)}
         </Select>
@@ -170,7 +181,7 @@ function RecordsTab() {
             },
           ]}
         />
-        <Pagination meta={meta} onPage={setPage} />
+        <InfiniteLoader list={list} />
       </Card>
     </>
   );

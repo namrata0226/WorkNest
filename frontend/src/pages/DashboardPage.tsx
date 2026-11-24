@@ -6,7 +6,7 @@ import type { BalanceRow, CompOffRequest, CompOffTx, LedgerRow, LeaveRequest } f
 import { days, formatDate, formatRange } from '../utils/date';
 import { LEDGER_LABEL } from '../utils/labels';
 import { PunchCard } from './AttendancePage';
-import { MyCalendarView } from './MyCalendarPage';
+import { Planner } from '../components/planner/Planner';
 
 interface Dashboard {
   year: number;
@@ -106,7 +106,7 @@ export function DashboardPage() {
         </div>
       </div>
 
-      <Card className="mt-4" title="My leave calendar"><MyCalendarView /></Card>
+      <div className="mt-4"><Planner compact /></div>
 
       <div className="mt-4 grid gap-4 lg:grid-cols-2">
         <Card title="Leave transactions" flush actions={<Link className="text-xs text-brand hover:underline" to="/balances">Balances</Link>}>

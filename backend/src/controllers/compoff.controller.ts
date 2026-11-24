@@ -2,6 +2,7 @@ import { randomUUID } from 'crypto';
 import { RequestHandler } from 'express';
 import { CompOffRequest, CompOffTransaction } from '../models/CompOff';
 import { Employee, IEmployee } from '../models/Employee';
+import { refuseOwnRecord } from '../middleware/auth';
 import { ctxOf } from '../services/audit';
 import * as service from '../services/compoff';
 import { companyToday } from '../services/settings';
@@ -75,6 +76,7 @@ export const reject: RequestHandler = async (req, res) => {
 };
 
 export const adjust: RequestHandler = async (req, res) => {
+  refuseOwnRecord(req.auth!, req.valid.body.employee, 'You cannot add or remove your own Comp-Off. Ask another administrator.');
   const idempotencyKey = req.get('Idempotency-Key') ?? randomUUID();
   created(res, await service.adjustCompOff(ctxOf(req), { ...req.valid.body, idempotencyKey }));
 };

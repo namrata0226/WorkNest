@@ -88,3 +88,8 @@ export const requireEmployeeProfile: RequestHandler = (req, _res, next) => {
   if (!req.auth?.employeeId) throw forbidden('This account has no employee profile', 'NO_EMPLOYEE_PROFILE');
   next();
 };
+
+/** Nobody grants themselves leave, Comp-Off or HR changes. Another administrator has to do it, and the audit log shows who. */
+export function refuseOwnRecord(auth: AuthContext, employeeId: unknown, message: string): void {
+  if (auth.employeeId && String(auth.employeeId) === String(employeeId)) throw forbidden(message, 'OWN_RECORD');
+}

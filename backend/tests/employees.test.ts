@@ -110,6 +110,19 @@ describe('employee directory', () => {
     expect(String(manager!.department)).toBe(String(dept));
     expect(manager!.joiningDate).toBe('2024-01-05');
   });
+
+  it('reads a Team column, and names an unknown team in the error', async () => {
+    const team = await makeDepartment('Platform');
+    const csv = [
+      'Employee ID,Full Name,Email,Joining Date,Team',
+      'T1,Team Member,t1@test.local,2026-01-05,Platform',
+      'T2,Lost Member,t2@test.local,2026-01-05,Nowhere',
+    ].join('\n');
+    const res = await hrAgent.post('/api/employees/import').attach('file', Buffer.from(csv), { filename: 'team.csv', contentType: 'text/csv' });
+    expect(res.body.data.created).toBe(1);
+    expect(res.body.data.errors[0].message).toBe('Unknown team "Nowhere"');
+    expect(String((await Employee.findOne({ employeeId: 'T1' }).lean())!.department)).toBe(String(team));
+  });
 });
 
 describe('Super Admin account management', () => {

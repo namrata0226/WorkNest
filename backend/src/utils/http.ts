@@ -37,4 +37,21 @@ export const pageMeta = (q: PageParams, total: number) => ({
   totalPages: Math.max(1, Math.ceil(total / q.limit)),
 });
 
+/** Which slice of an approval queue to list. Pending is the default so the queue keeps its original meaning. */
+export const APPROVAL_VIEWS = ['PENDING', 'APPROVED', 'REJECTED', 'ALL'] as const;
+export type ApprovalView = (typeof APPROVAL_VIEWS)[number];
+
+/** The status filter for a view. `approved` lists the statuses that count as approved for this kind of request. */
+export function approvalStatusFilter(view: ApprovalView | undefined, approved: string[] = ['APPROVED']): Record<string, unknown> {
+  switch (view ?? 'PENDING') {
+    case 'PENDING': return { status: 'PENDING' };
+    case 'APPROVED': return { status: { $in: approved } };
+    case 'REJECTED': return { status: 'REJECTED' };
+    default: return {};
+  }
+}
+
+/** Pending work oldest first; decided history newest first. */
+export const queueSort = (view: ApprovalView | undefined): Record<string, 1 | -1> => ((view ?? 'PENDING') === 'PENDING' ? { createdAt: 1 } : { createdAt: -1 });
+
 export const escapeRegex = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');

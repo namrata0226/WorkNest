@@ -56,7 +56,7 @@ const daysWithin = (r: ILeaveRequest, start: string, end: string) => r.dayBreakd
 const baseColumns = [
   { key: 'employeeName', header: 'Employee Name' },
   { key: 'employeeId', header: 'Employee ID' },
-  { key: 'department', header: 'Department' },
+  { key: 'department', header: 'Team' },
 ];
 
 function resolveRange(f: ReportFilters, today: string) {
@@ -156,8 +156,8 @@ export async function buildReport(name: ReportName, f: ReportFilters): Promise<T
         groups.set(key, g);
       }
       return {
-        title: `Department leave ${start} to ${end}`,
-        columns: [{ key: 'department', header: 'Department' }, { key: 'leaveType', header: 'Leave Type' }, { key: 'days', header: 'Days' }, { key: 'employees', header: 'Employees' }],
+        title: `Team leave ${start} to ${end}`,
+        columns: [{ key: 'department', header: 'Team' }, { key: 'leaveType', header: 'Leave Type' }, { key: 'days', header: 'Days' }, { key: 'employees', header: 'Employees' }],
         rows: [...groups.values()].sort((a, b) => a.department.localeCompare(b.department) || a.leaveType.localeCompare(b.leaveType)).map((g) => ({ department: g.department, leaveType: g.leaveType, days: g.days, employees: g.staff.size })),
       };
     }

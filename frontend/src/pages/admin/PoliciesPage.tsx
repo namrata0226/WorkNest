@@ -122,7 +122,7 @@ function PolicyModal({ policy, onClose, onDone }: { policy: Policy | null; onClo
       wide
       title={policy ? `Edit ${policy.name}` : 'Add leave policy'}
       onClose={onClose}
-      footer={<><Button onClick={onClose}>Cancel</Button><Button variant="primary" loading={busy} disabled={!name.trim() || !effectiveFrom} onClick={() => void save()}>Save policy</Button></>}
+      footer={<><Button onClick={onClose}>Cancel</Button><Button variant="primary" loading={busy} disabled={!name.trim() || !effectiveFrom} onClick={() => save()}>Save policy</Button></>}
     >
       <div className="grid gap-3 sm:grid-cols-2">
         {error && <div className="sm:col-span-2"><Note>{error}</Note></div>}
@@ -133,7 +133,7 @@ function PolicyModal({ policy, onClose, onDone }: { policy: Policy | null; onClo
         <div className="sm:col-span-2"><Checkbox label="Active" checked={isActive} onChange={(e) => setIsActive(e.target.checked)} /></div>
 
         <div className="mt-1 border-t border-line pt-3 text-xs text-muted sm:col-span-2">Applies automatically to people matching all the groups chosen below. Leave a group empty to ignore it.</div>
-        <Field label="Departments"><CheckboxGroup value={deptIds} onChange={setDeptIds} options={(departments.data ?? []).map((d) => ({ value: d._id, label: d.name }))} /></Field>
+        <Field label="Teams"><CheckboxGroup value={deptIds} onChange={setDeptIds} options={(departments.data ?? []).map((d) => ({ value: d._id, label: d.name }))} /></Field>
         <Field label="Locations"><CheckboxGroup value={locIds} onChange={setLocIds} options={(locations.data ?? []).map((l) => ({ value: l._id, label: l.name }))} /></Field>
         <Field label="Employee categories"><CheckboxGroup value={categories} onChange={setCategories} options={EMPLOYEE_CATEGORIES.map((c) => ({ value: c, label: titleCase(c) }))} /></Field>
         <Field label="Designations" hint="Comma separated"><Input value={designations} onChange={(e) => setDesignations(e.target.value)} /></Field>

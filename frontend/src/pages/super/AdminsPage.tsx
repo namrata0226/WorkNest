@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import { api, errorMessage, fieldErrors } from '../../api/client';
-import { Badge, Button, Card, CheckboxGroup, DataTable, Field, Input, Modal, Note, PageHeader, Pagination, Select, useToast } from '../../components/ui';
+import { Badge, Button, Card, CheckboxGroup, DataTable, Field, InfiniteLoader, Input, Modal, Note, PageHeader, Select, useConfirm, useToast } from '../../components/ui';
 import { useAuth } from '../../context/AuthContext';
 import { useFetch } from '../../hooks/useFetch';
+import { useInfiniteFetch } from '../../hooks/useInfiniteFetch';
 import type { Employee, Role } from '../../types';
 import { formatDateTime } from '../../utils/date';
 import { PERMISSION_LABEL, ROLE_LABEL } from '../../utils/labels';
@@ -22,9 +23,9 @@ interface AdminRow {
 export function AdminsPage() {
   const { user } = useAuth();
   const toast = useToast();
-  const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
-  const { data, meta, loading, error, reload } = useFetch<AdminRow[]>('/admins', { page, search, limit: 25 });
+  const list = useInfiniteFetch<AdminRow[]>('/admins', { search }, { limit: 25 });
+  const { data, meta, loading, error, reload } = list;
   const catalog = useFetch<{ assignable: string[] }>('/admins/permissions');
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<AdminRow | null>(null);
@@ -33,7 +34,7 @@ export function AdminsPage() {
   return (
     <>
       <PageHeader title="Admin accounts" subtitle="HR/Admin and Super Admin accounts, with what each can do" actions={<Button variant="primary" onClick={() => setCreating(true)}>Add admin</Button>} />
-      <div className="mb-3 max-w-sm"><Input aria-label="Search" placeholder="Search email" value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }} /></div>
+      <div className="mb-3 max-w-sm"><Input aria-label="Search" placeholder="Search email" value={search} onChange={(e) => { setSearch(e.target.value); }} /></div>
       {error && <Note>{error}</Note>}
       <Card flush>
         <DataTable<AdminRow>
@@ -49,7 +50,7 @@ export function AdminsPage() {
             { header: 'Status', cell: (a) => <Badge tone={a.isActive ? 'green' : 'gray'}>{a.isActive ? 'Active' : 'Inactive'}</Badge> },
           ]}
         />
-        <Pagination meta={meta} onPage={setPage} />
+        <InfiniteLoader list={list} />
       </Card>
       {creating && (
         <CreateModal
@@ -112,7 +113,7 @@ function CreateModal({ assignable, onClose, onDone }: { assignable: string[]; on
     <Modal
       title="Add admin"
       onClose={onClose}
-      footer={<><Button onClick={onClose}>Cancel</Button><Button variant="primary" loading={busy} disabled={mode === 'new' ? !email : !employee} onClick={() => void save()}>Add admin</Button></>}
+      footer={<><Button onClick={onClose}>Cancel</Button><Button variant="primary" loading={busy} disabled={mode === 'new' ? !email : !employee} onClick={() => save()}>Add admin</Button></>}
     >
       <div className="space-y-3">
         {error && <Note>{error}</Note>}
@@ -151,7 +152,10 @@ function EditModal({ admin, assignable, onClose, onDone }: { admin: AdminRow; as
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const confirm = useConfirm();
+
   const save = async () => {
+    if (admin.isActive && !isActive && !(await confirm({ title: `Deactivate ${admin.email}?`, message: 'They are signed out and can no longer sign in until reactivated.', confirmLabel: 'Deactivate', tone: 'danger' }))) return;
     setBusy(true);
     setError(null);
     try {
@@ -168,7 +172,7 @@ function EditModal({ admin, assignable, onClose, onDone }: { admin: AdminRow; as
     <Modal
       title={`Edit ${admin.email}`}
       onClose={onClose}
-      footer={<><Button onClick={onClose}>Cancel</Button><Button variant="primary" loading={busy} onClick={() => void save()}>Save</Button></>}
+      footer={<><Button onClick={onClose}>Cancel</Button><Button variant="primary" loading={busy} onClick={() => save()}>Save</Button></>}
     >
       <div className="space-y-3">
         {error && <Note>{error}</Note>}

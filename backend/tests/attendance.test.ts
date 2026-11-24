@@ -138,6 +138,38 @@ describe('what each day shows', () => {
     expect(res.body.data.summary.present).toBe(1);
     expect(res.body.data.summary.absent).toBe(1); // Friday 1 March
   });
+
+  it('counts work from home as attendance, but only once the day has come', async () => {
+    await empAgent.post('/api/attendance/punch-in').send({}); // Monday, in the office
+    const wfh = (await applyWfh(TUE, WED)).body.data._id; // future days
+    await managerAgent.patch(`/api/wfh/${wfh}/approve`).send({});
+    const before = (await empAgent.get('/api/attendance/my').query({ month: '2030-03' })).body.data.summary;
+    expect(before).toMatchObject({ present: 1, workFromHome: 0, attended: 1 });
+
+    await later('2030-03-06T12:00:00Z'); // Wednesday
+    const after = (await empAgent.get('/api/attendance/my').query({ month: '2030-03' })).body.data.summary;
+    expect(after).toMatchObject({ present: 1, workFromHome: 2, attended: 3 });
+    expect(after.workingDays).toBe(after.attended + after.onLeave + after.absent);
+  });
+
+  it('adds up any range of dates', async () => {
+    await empAgent.post('/api/attendance/punch-in').send({});
+    const res = await empAgent.get('/api/attendance/my').query({ from: '2030-02-25', to: '2030-03-04' });
+    expect(res.status).toBe(200);
+    expect(res.body.data).toMatchObject({ from: '2030-02-25', to: '2030-03-04' });
+    expect(res.body.data.days.map((d: { date: string }) => d.date)).toEqual(['2030-02-25', '2030-02-26', '2030-02-27', '2030-02-28', '2030-03-01', '2030-03-02', '2030-03-03', '2030-03-04']);
+    expect(res.body.data.summary.present).toBe(1);
+  });
+
+  it.each([
+    [{ from: '2030-03-04' }, 'Choose both a start and an end date'],
+    [{ from: '2030-03-04', to: '2030-03-01' }, 'The end date cannot be before the start date'],
+    [{ from: '2029-01-01', to: '2030-03-01' }, 'Choose a period of at most 366 days'],
+  ])('refuses the range %o', async (query, message) => {
+    const res = await empAgent.get('/api/attendance/my').query(query);
+    expect(res.status).toBe(400);
+    expect(res.body.error.details[0].message).toBe(message);
+  });
 });
 
 describe('work from home', () => {
@@ -233,6 +265,17 @@ describe('work from home', () => {
     expect(row.employee.fullName).toBe(emp.employee.fullName);
   });
 
+  it('keeps decided requests listed under their view', async () => {
+    const id = String((await applyWfh(WED)).body.data._id);
+    expect((await managerAgent.patch(`/api/wfh/${id}/approve`).send({})).status).toBe(200);
+    const ids = async (view: string) => (await managerAgent.get('/api/wfh/pending').query({ view })).body.data.map((r: { _id: string }) => r._id);
+    expect(await ids('PENDING')).toEqual([]);
+    expect(await ids('APPROVED')).toEqual([id]);
+    expect(await ids('REJECTED')).toEqual([]);
+    expect(await ids('ALL')).toEqual([id]);
+    expect((await managerAgent.get('/api/wfh/pending').query({ view: 'NOPE' })).status).toBe(400);
+  });
+
   it('hides one person\'s requests from another, and cancelling them', async () => {
     const id = (await applyWfh(WED)).body.data._id;
     const other = await agentFor((await makePerson()).email);
@@ -287,7 +330,7 @@ describe('HR view and corrections', () => {
     expect(row(emp)).toMatchObject({ status: 'PRESENT', punchIn: '09:30' });
     expect(row(manager).status).toBe('WFH');
     expect(row(hr).status).toBe('UPCOMING');
-    expect(res.body.data.summary).toMatchObject({ present: 1, workFromHome: 1 });
+    expect(res.body.data.summary).toMatchObject({ present: 1, workFromHome: 1, attended: 2 });
     expect(res.body.meta.total).toBe(3);
   });
 

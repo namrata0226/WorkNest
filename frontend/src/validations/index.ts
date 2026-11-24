@@ -1,7 +1,9 @@
 import { z } from 'zod';
+import './messages';
 
 const dateField = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Choose a date');
-const required = (label: string, max = 1000) => z.string().trim().min(1, `${label} is required`).max(max);
+const required = (label: string, max = 1000) => z.string().trim().min(1, `${label} is required`).max(max, `${label} must be ${max.toLocaleString('en-IN')} characters or fewer`);
+const optionalText = (label: string, max: number) => z.string().max(max, `${label} must be ${max.toLocaleString('en-IN')} characters or fewer`);
 const emailField = z.string().trim().min(1, 'Email is required').email('Enter a valid email address');
 
 export const loginSchema = z.object({ email: emailField, password: z.string().min(1, 'Password is required') });
@@ -26,10 +28,10 @@ export const leaveSchema = z
     endDate: dateField,
     dayType: z.enum(['FULL', 'HALF']),
     halfSession: z.enum(['FIRST', 'SECOND']).nullable().optional(),
-    reason: z.string().trim().max(1000).optional(),
+    reason: optionalText('The reason', 1000).trim().optional(),
     // Set by the form from the leave type. The server applies the same rule for itself.
     reasonOptional: z.boolean().optional(),
-    handoverNotes: z.string().max(2000).optional(),
+    handoverNotes: optionalText('Handover notes', 2000).optional(),
   })
   .refine((v) => v.reasonOptional || Boolean(v.reason), { message: 'A reason is required', path: ['reason'] })
   .refine((v) => v.startDate <= v.endDate, { message: 'The end date cannot be before the start date', path: ['endDate'] })
@@ -51,7 +53,7 @@ export const employeeSchema = z.object({
   phone: z.union([z.literal(''), z.string().regex(/^[+\d][\d\s()-]{5,20}$/, 'Enter a valid phone number')]).optional(),
   gender: z.enum(['', 'FEMALE', 'MALE', 'OTHER']).optional(),
   department: z.string().optional(),
-  designation: z.string().max(100).optional(),
+  designation: optionalText('Designation', 100).optional(),
   reportingManager: z.string().optional(),
   joiningDate: dateField,
   location: z.string().optional(),
@@ -87,11 +89,18 @@ export const correctionRequestSchema = z
   .refine((v) => !v.punchOut || v.punchOut > v.punchIn, { message: 'Punch out must be after punch in', path: ['punchOut'] });
 export type CorrectionRequestForm = z.infer<typeof correctionRequestSchema>;
 
+export const EXPENSE_MAX_AMOUNT = 10_000_000;
+export const EXPENSE_DESCRIPTION_MAX = 1000;
+
 export const expenseSchema = z.object({
   category: z.enum(['TRAVEL', 'FOOD', 'ACCOMMODATION', 'SUPPLIES', 'INTERNET_PHONE', 'OTHER']),
   expenseDate: dateField,
-  amount: z.number({ message: 'Enter an amount' }).positive('Enter an amount above zero').max(10_000_000),
-  description: required('A description'),
+  amount: z
+    .number({ message: 'Enter an amount' })
+    .positive('Enter an amount above zero')
+    .max(EXPENSE_MAX_AMOUNT, `The amount cannot be more than ₹${EXPENSE_MAX_AMOUNT.toLocaleString('en-IN')}`)
+    .refine((n) => Math.round(n * 100) / 100 === n, 'Use at most two decimal places'),
+  description: required('The description', EXPENSE_DESCRIPTION_MAX),
 });
 export type ExpenseForm = z.infer<typeof expenseSchema>;
 
@@ -107,7 +116,7 @@ export const holidaySchema = z.object({
   name: required('Holiday name', 120),
   date: dateField,
   category: z.enum(['NATIONAL', 'PUBLIC', 'FESTIVAL', 'COMPANY', 'OPTIONAL', 'REGIONAL', 'CUSTOM']),
-  description: z.string().max(500).optional(),
+  description: optionalText('The description', 500).optional(),
   isHalfDay: z.boolean(),
   halfDaySession: z.enum(['FIRST', 'SECOND']),
   recurring: z.boolean(),
@@ -121,7 +130,7 @@ const quarterNumber = z.number({ error: 'Enter a number' }).refine((n) => Number
 
 export const adjustmentSchema = z.object({
   leaveType: z.string().min(1, 'Choose a leave type'),
-  year: z.number({ error: 'Enter a year' }).int().min(2000).max(2100),
+  year: z.number({ error: 'Enter a year' }).int('Enter a whole year').min(2000, 'Enter a year from 2000 to 2100').max(2100, 'Enter a year from 2000 to 2100'),
   kind: z.enum(['CREDIT', 'DEDUCTION', 'ADJUSTMENT', 'OPENING']),
   amount: quarterNumber.refine((n) => n !== 0, 'Cannot be zero'),
   reason: required('A reason', 500),
@@ -138,3 +147,31 @@ export const compOffManualSchema = z.object({
 export type CompOffManualForm = z.infer<typeof compOffManualSchema>;
 
 export const reasonSchema = z.object({ reason: required('A reason') });
+
+const timeField = z.string().regex(/^\d{2}:\d{2}$/, 'Enter a time');
+export const calendarItemSchema = z
+  .object({
+    kind: z.enum(['EVENT', 'TASK']),
+    title: required('A title', 200),
+    date: dateField,
+    endDate: z.string().optional(),
+    allDay: z.boolean(),
+    startTime: z.union([z.literal(''), timeField]).optional(),
+    endTime: z.union([z.literal(''), timeField]).optional(),
+    location: optionalText('The location', 200).optional(),
+    description: optionalText('The description', 2000).optional(),
+    color: z.enum(['brand', 'sky', 'violet', 'amber', 'rose', 'slate']),
+    visibility: z.enum(['PRIVATE', 'COMPANY']),
+    /** A select's value: '' for none, otherwise minutes. */
+    reminder: z.string(),
+  })
+  .superRefine((v, ctx) => {
+    const timed = !v.allDay;
+    if (timed && !v.startTime) ctx.addIssue({ code: 'custom', path: ['startTime'], message: v.kind === 'TASK' ? 'Choose a due time, or tick "No due time"' : 'Choose a start time' });
+    if (timed && v.kind === 'EVENT') {
+      if (!v.endTime) ctx.addIssue({ code: 'custom', path: ['endTime'], message: 'Choose an end time' });
+      else if (v.startTime && v.endTime <= v.startTime) ctx.addIssue({ code: 'custom', path: ['endTime'], message: 'The end time must be after the start time' });
+    }
+    if (!timed && v.kind === 'EVENT' && v.endDate && v.endDate < v.date) ctx.addIssue({ code: 'custom', path: ['endDate'], message: 'The end date cannot be before the start date' });
+  });
+export type CalendarItemForm = z.infer<typeof calendarItemSchema>;

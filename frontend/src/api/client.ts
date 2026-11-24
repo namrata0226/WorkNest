@@ -40,6 +40,9 @@ interface ApiErrorBody { error?: { code?: string; message?: string; details?: Ap
 export function errorMessage(err: unknown, fallback = 'Something went wrong. Please try again.'): string {
   const axiosErr = err as AxiosError<ApiErrorBody> | undefined;
   const body = axiosErr?.response?.data;
+  // A rejected field with nowhere to highlight it: say what was wrong rather than "correct the highlighted fields".
+  const detail = body?.error?.details?.[0]?.message;
+  if (body?.error?.code === 'VALIDATION_ERROR' && detail) return detail;
   if (body?.error?.message) return body.error.message;
   // No response at all: offline, DNS failure, CORS, or the request timed out.
   if (axiosErr?.isAxiosError && !axiosErr.response) return 'Could not reach the server. Check your connection and try again.';

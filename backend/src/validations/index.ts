@@ -1,11 +1,15 @@
 import { z } from 'zod';
+import './messages';
 import { APPROVER_TYPES, EMPLOYEE_CATEGORIES, EMPLOYEE_GENDERS, EMPLOYMENT_STATUS, HALF_SESSIONS, HOLIDAY_CATEGORIES, HR_ASSIGNABLE_PERMISSIONS, LEAVE_KINDS, LEAVE_STATUS_VALUES } from '../constants';
 import { dateOnly, objectId, quarterStep } from '../middleware/validate';
+import { diffDays } from '../utils/dates';
+import { CALENDAR_ITEM_COLORS, CALENDAR_ITEM_KINDS, CALENDAR_ITEM_VISIBILITY } from '../models/CalendarItem';
+import { SUMMARY_DETAIL_KINDS } from '../services/calendar';
 import { REPORT_NAMES } from '../services/report';
-import { paginationQuery } from '../utils/http';
+import { APPROVAL_VIEWS, paginationQuery } from '../utils/http';
 
 const email = z.string().trim().toLowerCase().email('Must be a valid email address').max(200);
-const text = (max: number) => z.string().trim().min(1, 'This field is required').max(max);
+const text = (max: number) => z.string().trim().min(1, 'This field is required').max(max, `Use ${max.toLocaleString('en-IN')} characters or fewer`);
 const nullableId = objectId.nullable().optional();
 const month = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/, 'Must be in YYYY-MM format');
 const year = z.coerce.number().int().min(2000).max(2100);
@@ -36,6 +40,7 @@ export const employeeCreateBody = z.strictObject({
 });
 export const employeeUpdateBody = z.strictObject(employeeFields).partial();
 /* What people may change about themselves. Gender decides leave entitlement and email is the login, so both stay with HR. */
+/** What any employee may change about themselves. Everything else (gender, email, team, manager…) goes through HR. */
 export const employeeProfileBody = z.strictObject({ fullName: employeeFields.fullName, phone: employeeFields.phone });
 export const employeeStatusBody = z.strictObject({ status: z.enum(EMPLOYMENT_STATUS) });
 export const employeeListQuery = z.object({
@@ -48,16 +53,26 @@ export const employeeListQuery = z.object({
 
 /* Attendance and work from home. Punches take no body: the server records the time. */
 const clockTime = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Must be a time such as 09:30');
-export const attendanceMonthQuery = z.object({ month: month.optional() });
+/** Longest attendance period one request may cover: a year, so a report never builds an unbounded table. */
+export const MAX_ATTENDANCE_DAYS = 366;
+const periodFields = { month: month.optional(), from: dateOnly.optional(), to: dateOnly.optional() };
+type PeriodFields = { month?: string; from?: string; to?: string };
+const checkPeriod = <T extends PeriodFields>(schema: z.ZodType<T>) => schema
+  .refine((q) => Boolean(q.from) === Boolean(q.to), { message: 'Choose both a start and an end date', path: ['to'] })
+  .refine((q) => !q.from || !q.to || q.from <= q.to, { message: 'The end date cannot be before the start date', path: ['to'] })
+  .refine((q) => !q.from || !q.to || diffDays(q.to, q.from) < MAX_ATTENDANCE_DAYS, { message: `Choose a period of at most ${MAX_ATTENDANCE_DAYS} days`, path: ['to'] });
+/** A month (YYYY-MM) or a from/to date range. With neither, the current month. */
+export const attendanceMonthQuery = checkPeriod(z.object(periodFields));
 export const attendanceDailyQuery = z.object({ ...paginationQuery, date: dateOnly.optional(), department: objectId.optional(), search: z.string().trim().max(100).optional() });
 export const attendanceCorrectionBody = z.strictObject({ punchIn: clockTime, punchOut: clockTime.nullable().optional(), note: text(500) });
 export const emptyBody = z.strictObject({});
 export const wfhApplyBody = z.strictObject({ startDate: dateOnly, endDate: dateOnly, reason: text(1000) });
 export const wfhListQuery = z.object(paginationQuery);
 
-const moneyAmount = z.number().positive('Enter an amount above zero').max(10_000_000).refine((n) => Math.round(n * 100) / 100 === n, 'Use at most two decimal places');
+const moneyAmount = z.number().positive('Enter an amount above zero').max(10_000_000, 'The amount cannot be more than ₹1,00,00,000').refine((n) => Math.round(n * 100) / 100 === n, 'Use at most two decimal places');
 export const correctionRequestBody = z.strictObject({ date: dateOnly, punchIn: clockTime, punchOut: clockTime.nullable().optional(), reason: text(500) });
-export const attendanceExportQuery = z.object({ month, department: objectId.optional(), format: z.enum(['csv', 'xlsx']).default('xlsx') });
+export const attendanceExportQuery = checkPeriod(z.object({ ...periodFields, department: objectId.optional(), format: z.enum(['csv', 'xlsx']).default('xlsx') }))
+  .refine((q) => Boolean(q.month || q.from), { message: 'Choose a month or a date range', path: ['month'] });
 export const teamDailyQuery = z.object({ ...paginationQuery, date: dateOnly.optional(), search: z.string().trim().max(100).optional() });
 export const dateRangeQuery = z.object({ start: dateOnly, end: dateOnly });
 export const emailPreviewBody = z.strictObject({ token: z.string().min(20).max(200) });
@@ -119,6 +134,8 @@ const leaveFilter = {
   from: dateOnly.optional(),
   to: dateOnly.optional(),
 };
+export const approvalViewQuery = z.object({ view: z.enum(APPROVAL_VIEWS).optional() });
+export const approvalsQuery = z.object({ ...paginationQuery, ...leaveFilter, view: z.enum(APPROVAL_VIEWS).optional() });
 export const myLeavesQuery = z.object({ ...paginationQuery, ...leaveFilter });
 export const allLeavesQuery = z.object({ ...paginationQuery, ...leaveFilter, employee: objectId.optional(), department: objectId.optional(), search: z.string().trim().max(100).optional() });
 export const reasonBody = z.strictObject({ reason: text(1000) });
@@ -233,6 +250,23 @@ export const policyCreateBody = z.strictObject(policyFields).partial().required(
 export const policyUpdateBody = z.strictObject(policyFields).partial();
 
 /* Calendar */
+/* Personal events and tasks */
+export const calendarItemBody = z.strictObject({
+  kind: z.enum(CALENDAR_ITEM_KINDS),
+  title: text(200),
+  description: z.string().trim().max(2000).nullable().optional(),
+  location: z.string().trim().max(200).nullable().optional(),
+  date: dateOnly,
+  endDate: dateOnly.nullable().optional(),
+  allDay: z.boolean().default(false),
+  startTime: clockTime.nullable().optional(),
+  endTime: clockTime.nullable().optional(),
+  color: z.enum(CALENDAR_ITEM_COLORS).default('brand'),
+  visibility: z.enum(CALENDAR_ITEM_VISIBILITY).default('PRIVATE'),
+  reminderMinutes: z.number().int().min(0).max(10_080).nullable().optional(),
+});
+export const calendarItemDoneBody = z.strictObject({ done: z.boolean() });
+
 export const calendarQuery = z
   .object({
     start: dateOnly,
@@ -252,6 +286,7 @@ export const summaryQuery = z.object({
   leaveType: objectId.optional(),
   search: z.string().trim().max(100).optional(),
 });
+export const summaryDetailsQuery = z.object({ month, kind: z.enum(SUMMARY_DETAIL_KINDS), department: objectId.optional(), leaveType: objectId.optional(), search: z.string().trim().max(100).optional() });
 export const calendarExportQuery = z.object({
   month,
   format: exportFormat,

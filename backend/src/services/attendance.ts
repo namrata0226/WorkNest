@@ -6,7 +6,7 @@ import { Employee, IEmployee } from '../models/Employee';
 import { ILeaveRequest, LeaveRequest } from '../models/LeaveRequest';
 import { addDays, diffDays, eachDay, isWeekend, monthRange, todayIn } from '../utils/dates';
 import { conflict, forbidden, notFound, unprocessable } from '../utils/errors';
-import { escapeRegex } from '../utils/http';
+import { ApprovalView, approvalStatusFilter, escapeRegex, queueSort } from '../utils/http';
 import { isDuplicateKeyError, withTransaction } from '../utils/transaction';
 import { audit, RequestContext } from './audit';
 import { employeeHolidays, holidayAppliesTo, holidayOccurrences, nonOptional } from './holiday';
@@ -92,14 +92,18 @@ function buildDay(employee: Pick<IEmployee, 'joiningDate'>, date: string, today:
 
 export type Day = ReturnType<typeof buildDay>;
 
-function summarize(days: Day[]) {
+/**
+ * Totals for a run of days. Work from home counts as attendance: `attended` is days worked in the office plus
+ * days worked from home, out of `workingDays` (the days someone was expected to work and the day has passed).
+ */
+function summarize(days: Day[], today: string) {
   const count = (...statuses: AttendanceStatus[]) => days.filter((d) => statuses.includes(d.status)).length;
-  return {
-    present: count('PRESENT'),
-    workFromHome: count('WFH'),
-    onLeave: count('ON_LEAVE') + count('HALF_LEAVE'),
-    absent: count('ABSENT'),
-  };
+  const present = count('PRESENT');
+  // Approved work from home shows on future days too, but only counts once the day has come.
+  const workFromHome = days.filter((d) => d.status === 'WFH' && d.date <= today).length;
+  const onLeave = count('ON_LEAVE') + count('HALF_LEAVE');
+  const absent = count('ABSENT');
+  return { present, workFromHome, attended: present + workFromHome, onLeave, absent, workingDays: present + workFromHome + onLeave + absent };
 }
 
 type DepartmentNamed = Omit<IEmployee, 'department'> & { department: { _id: Types.ObjectId; name: string } | null };
@@ -122,21 +126,31 @@ export async function rangeForEmployees(query: Record<string, unknown>, start: s
       const scope = { ...e, department: e.department?._id ?? null };
       const holidays = nonOptional(occurrences.filter((h) => holidayAppliesTo(h, scope)));
       const days = dates.map((date) => buildDay(e, date, today, settings.attendanceStartDate, sources.get(String(e._id))!, holidays.find((h) => h.date === date)));
-      return { employee: e, days, summary: summarize(days) };
+      return { employee: e, days, summary: summarize(days, today) };
     }),
   };
 }
 
-export async function employeeMonth(employeeId: Types.ObjectId | string, month: string) {
+export interface Period { start: string; end: string }
+
+/** A from/to range when given, otherwise the month, otherwise the current month in the company's timezone. */
+export async function resolvePeriod(q: { month?: string; from?: string; to?: string }): Promise<Period> {
+  if (q.from && q.to) return { start: q.from, end: q.to };
+  return monthRange(q.month ?? todayIn((await getSettings()).timezone).slice(0, 7));
+}
+
+export const employeeMonth = (employeeId: Types.ObjectId | string, month: string) => employeeRange(employeeId, monthRange(month));
+
+/** One person's days over any period, with totals. `month` is the period's first month, kept for older clients. */
+export async function employeeRange(employeeId: Types.ObjectId | string, { start, end }: Period) {
   const employee = await Employee.findById(employeeId).lean<IEmployee>();
   if (!employee) throw notFound('Employee');
   const settings = await getSettings();
   const today = todayIn(settings.timezone);
-  const { start, end } = monthRange(month);
   const [sources, holidays] = await Promise.all([loadSources([employee._id], start, end), employeeHolidays(employee, start, end)]);
   const applicable = nonOptional(holidays);
   const days = eachDay(start, end).map((date) => buildDay(employee, date, today, settings.attendanceStartDate, sources.get(String(employee._id))!, applicable.find((h) => h.date === date)));
-  return { today, month, employee: { _id: employee._id, fullName: employee.fullName, employeeId: employee.employeeId }, days, summary: summarize(days) };
+  return { today, month: start.slice(0, 7), from: start, to: end, employee: { _id: employee._id, fullName: employee.fullName, employeeId: employee.employeeId }, days, summary: summarize(days, today) };
 }
 
 /** Today's state for the punch button, whatever month is being viewed. */
@@ -197,7 +211,7 @@ export async function dailyAttendance(f: DailyFilters) {
       ...buildDay(e, f.date, today, settings.attendanceStartDate, sources.get(String(e._id))!, holiday),
     };
   });
-  return { date: f.date, today, summary: { ...summarize(rows), notPunched: rows.filter((r) => r.status === 'UPCOMING').length }, rows };
+  return { date: f.date, today, summary: { ...summarize(rows, today), notPunched: rows.filter((r) => r.status === 'UPCOMING').length }, rows };
 }
 
 /** The checks shared by HR's corrections and employees' requests, so both follow the same rules. */
@@ -277,15 +291,15 @@ export async function requestCorrection(ctx: RequestContext, input: { date: stri
 
 const canManageAttendance = (auth: AuthContext) => can(auth, PERMISSIONS.ATTENDANCE_MANAGE);
 
-export async function pendingCorrections(auth: AuthContext) {
-  const query: Record<string, unknown> = { status: 'PENDING' };
+export async function pendingCorrections(auth: AuthContext, view?: ApprovalView) {
+  const query: Record<string, unknown> = approvalStatusFilter(view);
   if (canManageAttendance(auth)) {
     if (auth.employeeId) query.employee = { $ne: auth.employeeId };
   } else {
     if (!auth.employeeId) return [];
     query.employee = { $in: (await Employee.find({ reportingManager: auth.employeeId }).select('_id').lean<IEmployee[]>()).map((e) => e._id) };
   }
-  return AttendanceCorrection.find(query).sort({ createdAt: 1 }).limit(200)
+  return AttendanceCorrection.find(query).sort(queueSort(view)).limit(200)
     .populate({ path: 'employee', select: 'fullName employeeId department avatarFile', populate: { path: 'department', select: 'name' } })
     .lean();
 }
@@ -333,9 +347,9 @@ export async function cancelCorrection(ctx: RequestContext, id: string) {
 
 /* Managers. Only direct reports, and only to read. */
 
-export async function teamMonth(auth: AuthContext, employeeId: string, month: string) {
+export async function teamMonth(auth: AuthContext, employeeId: string, period: Period) {
   if (!auth.employeeId || !(await Employee.exists({ _id: employeeId, reportingManager: auth.employeeId }))) throw notFound('Employee');
-  return employeeMonth(employeeId, month);
+  return employeeRange(employeeId, period);
 }
 
 /* Work from home */
@@ -389,12 +403,12 @@ export async function applyWfh(ctx: RequestContext, input: { startDate: string; 
 const canDecideAny = (auth: AuthContext) => can(auth, PERMISSIONS.LEAVE_APPROVE);
 
 /** Managers see their own reports and leave approvers see everyone. Nobody sees their own request here. */
-export async function pendingWfh(auth: AuthContext) {
-  const query: Record<string, unknown> = { status: 'PENDING' };
+export async function pendingWfh(auth: AuthContext, view?: ApprovalView) {
+  const query: Record<string, unknown> = approvalStatusFilter(view);
   const reports = canDecideAny(auth) || !auth.employeeId ? null : await Employee.find({ reportingManager: auth.employeeId }).select('_id').lean<IEmployee[]>();
   if (reports) query.employee = { $in: reports.map((e) => e._id) };
   else if (auth.employeeId) query.employee = { $ne: auth.employeeId };
-  return WfhRequest.find(query).sort({ createdAt: 1 }).limit(200)
+  return WfhRequest.find(query).sort(queueSort(view)).limit(200)
     .populate({ path: 'employee', select: 'fullName employeeId department avatarFile', populate: { path: 'department', select: 'name' } })
     .lean();
 }

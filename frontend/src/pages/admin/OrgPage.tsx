@@ -58,7 +58,7 @@ function OrgSection({ title, path, extraField, extraLabel }: { title: string; pa
         <Modal
           title={editing === 'new' ? `Add to ${title.toLowerCase()}` : `Edit ${editing.name}`}
           onClose={() => setEditing(null)}
-          footer={<><Button onClick={() => setEditing(null)}>Cancel</Button><Button variant="primary" loading={busy} disabled={!name.trim()} onClick={() => void save()}>Save</Button></>}
+          footer={<><Button onClick={() => setEditing(null)}>Cancel</Button><Button variant="primary" loading={busy} disabled={!name.trim()} onClick={() => save()}>Save</Button></>}
         >
           <div className="space-y-3">
             {formError && <Note>{formError}</Note>}
@@ -77,9 +77,9 @@ function OrgSection({ title, path, extraField, extraLabel }: { title: string; pa
 export function OrgPage() {
   return (
     <>
-      <PageHeader title="Departments and locations" subtitle="Used for filters, holiday applicability and leave policies" />
+      <PageHeader title="Teams and locations" subtitle="Used for filters, holiday applicability and leave policies" />
       <div className="grid gap-4 lg:grid-cols-2">
-        <OrgSection title="Departments" path="/departments" extraField="code" extraLabel="Code" />
+        <OrgSection title="Teams" path="/departments" extraField="code" extraLabel="Code" />
         <OrgSection title="Locations" path="/locations" extraField="city" extraLabel="City" />
       </div>
     </>

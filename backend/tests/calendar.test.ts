@@ -142,6 +142,43 @@ describe('monthly summary', () => {
     expect((await hrAgent.get('/api/calendar/summary?month=2030-03')).body.data.cards.totalApprovedLeaveDays).toBe(0);
   });
 
+  it('lists the people and requests behind each card, matching its number', async () => {
+    await leaveFor(eng, cl, FRI, MON); // 2 days
+    await leaveFor(eng, sl, TUE, TUE); // 1 day
+    await leaveFor(sales, cl, TUE, TUE); // 1 day
+    await leaveFor(sales, sl, WED, WED, false); // pending
+    const detail = async (kind: string) => (await hrAgent.get(`/api/calendar/summary/details?month=2030-03&kind=${kind}`)).body.data;
+
+    expect((await detail('active')).people).toHaveLength(3);
+
+    const month = await detail('onLeaveMonth');
+    expect(month.people.map((p: any) => [p.employee.fullName, p.days, p.leaves.length])).toEqual([['Asha Engineer', 3, 2], ['Ben Seller', 1, 1]]);
+
+    const approved = await detail('approvedDays');
+    expect(approved.requests.reduce((s: number, r: any) => s + r.leave.days, 0)).toBe(4);
+    expect(approved.requests[0].leave.leaveType.code).toBeTruthy();
+
+    const pending = await detail('pending');
+    expect(pending.requests.map((r: any) => [r.employee.fullName, r.leave.status])).toEqual([['Ben Seller', 'PENDING']]);
+
+    const peak = await detail('peak');
+    expect(peak.peak).toBe(2);
+    expect(peak.dates.map((d: any) => [d.date, d.people.map((p: any) => p.employee.fullName)])).toEqual([[TUE, ['Asha Engineer', 'Ben Seller']]]);
+  });
+
+  it('applies the page filters to the lists', async () => {
+    await leaveFor(eng, cl, MON, MON);
+    await leaveFor(sales, cl, MON, MON);
+    const res = await hrAgent.get(`/api/calendar/summary/details?month=2030-03&kind=approvedDays&department=${engDept}`);
+    expect(res.body.data.requests.map((r: any) => r.employee.fullName)).toEqual(['Asha Engineer']);
+  });
+
+  it('keeps the lists for those who can read the company calendar', async () => {
+    const agent = await agentFor(eng.email);
+    expect((await agent.get('/api/calendar/summary/details?month=2030-03&kind=active')).status).toBe(403);
+    expect((await hrAgent.get('/api/calendar/summary/details?month=2030-03&kind=nope')).status).toBe(400);
+  });
+
   it('paginates the employee table', async () => {
     const res = await hrAgent.get('/api/calendar/summary?month=2030-03&limit=2&page=2');
     expect(res.body.data.rows).toHaveLength(1);
@@ -153,7 +190,7 @@ describe('monthly summary', () => {
     await leaveFor(eng, cl, FRI, MON);
     const csv = await hrAgent.get('/api/calendar/export?month=2030-03&format=csv');
     expect(csv.headers['content-type']).toMatch(/text\/csv/);
-    expect(csv.text).toContain('Employee Name,Employee ID,Department,Casual Leave');
+    expect(csv.text).toContain('Employee Name,Employee ID,Team,Casual Leave');
     expect(csv.text).toMatch(/Asha Engineer,T\d+,Engineering,2,0,0,0,0,2/);
 
     const xlsx = await hrAgent.get('/api/calendar/export?month=2030-03&format=xlsx').buffer(true).parse((res, cb) => {

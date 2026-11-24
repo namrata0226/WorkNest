@@ -19,7 +19,7 @@ const currentMonth = async () => todayIn((await getSettings()).timezone).slice(0
 /* Attendance corrections, export, team */
 export const requestCorrection: RequestHandler = async (req, res) => created(res, await attendance.requestCorrection(ctxOf(req), req.valid.body));
 export const myCorrections: RequestHandler = async (req, res) => ok(res, await attendance.myCorrections(req.auth!.employeeId!));
-export const pendingCorrections: RequestHandler = async (req, res) => ok(res, await attendance.pendingCorrections(req.auth!));
+export const pendingCorrections: RequestHandler = async (req, res) => ok(res, await attendance.pendingCorrections(req.auth!, req.valid.query.view));
 export const approveCorrection: RequestHandler = async (req, res) => ok(res, await attendance.approveCorrection(ctxOf(req), req.valid.params.id));
 export const rejectCorrection: RequestHandler = async (req, res) => ok(res, await attendance.rejectCorrection(ctxOf(req), req.valid.params.id, req.valid.body.reason));
 export const cancelCorrection: RequestHandler = async (req, res) => ok(res, await attendance.cancelCorrection(ctxOf(req), req.valid.params.id));
@@ -27,28 +27,35 @@ export const cancelCorrection: RequestHandler = async (req, res) => ok(res, awai
 const DAY_CODE: Record<attendance.AttendanceStatus, string> = { PRESENT: 'P', WFH: 'WFH', ON_LEAVE: 'L', HALF_LEAVE: 'HL', HOLIDAY: 'H', WEEKEND: 'W', ABSENT: 'A', UPCOMING: '', NOT_EMPLOYED: '', NOT_TRACKED: '' };
 
 export const exportAttendance: RequestHandler = async (req, res) => {
-  const { month, department, format } = req.valid.query;
+  const { department, format } = req.valid.query;
+  const { start, end } = await attendance.resolvePeriod(req.valid.query);
   const query: Record<string, unknown> = { employmentStatus: { $ne: 'INACTIVE' } };
   if (department) query.department = department;
-  const { rows } = await attendance.monthForEmployees(query, month);
+  const { rows } = await attendance.rangeForEmployees(query, start, end);
   const dates = rows[0]?.days.map((d) => d.date) ?? [];
-  await audit(ctxOf(req), { action: 'ATTENDANCE_EXPORTED', entityType: 'Attendance', summary: month });
+  // A single month keeps its short "2026-11" label; any other period is named by its dates.
+  const label = req.valid.query.month ?? `${start} to ${end}`;
+  // Day columns show the day of the month, plus the month when the period crosses one.
+  const sameMonth = start.slice(0, 7) === end.slice(0, 7);
+  await audit(ctxOf(req), { action: 'ATTENDANCE_EXPORTED', entityType: 'Attendance', summary: label });
   await sendTable(res, {
-    title: `Attendance ${month}`,
+    title: `Attendance ${label}`,
     columns: [
       { key: 'employeeId', header: 'Employee ID' },
       { key: 'employeeName', header: 'Employee Name' },
-      { key: 'department', header: 'Department' },
+      { key: 'department', header: 'Team' },
+      { key: 'attended', header: 'Total Attendance' },
       { key: 'present', header: 'Present' },
       { key: 'wfh', header: 'Work From Home' },
       { key: 'leave', header: 'On Leave' },
       { key: 'absent', header: 'Absent' },
-      ...dates.map((d) => ({ key: d, header: d.slice(8) })),
+      ...dates.map((d) => ({ key: d, header: sameMonth ? d.slice(8) : `${d.slice(8)}/${d.slice(5, 7)}` })),
     ],
     rows: rows.map((r) => ({
       employeeId: r.employee.employeeId,
       employeeName: r.employee.fullName,
       department: r.employee.department?.name ?? '',
+      attended: r.summary.attended,
       present: r.summary.present,
       wfh: r.summary.workFromHome,
       leave: r.summary.onLeave,
@@ -66,7 +73,7 @@ export const teamDaily: RequestHandler = async (req, res) => {
   ok(res, { ...result, rows: result.rows.slice(skip, skip + limit) }, pageMeta(q, result.rows.length));
 };
 export const teamMonth: RequestHandler = async (req, res) => {
-  ok(res, await attendance.teamMonth(req.auth!, req.valid.params.employeeId, req.valid.query.month ?? await currentMonth()));
+  ok(res, await attendance.teamMonth(req.auth!, req.valid.params.employeeId, await attendance.resolvePeriod(req.valid.query)));
 };
 
 /* Insights and team calendar */
@@ -124,8 +131,8 @@ export const setItem: RequestHandler = async (req, res) => {
 
 /* Payroll */
 const payrollColumns = [
-  { key: 'employeeId', header: 'Employee ID' }, { key: 'employeeName', header: 'Employee Name' }, { key: 'department', header: 'Department' },
-  { key: 'employedDays', header: 'Days Employed' }, { key: 'present', header: 'Present' }, { key: 'workFromHome', header: 'Work From Home' },
+  { key: 'employeeId', header: 'Employee ID' }, { key: 'employeeName', header: 'Employee Name' }, { key: 'department', header: 'Team' },
+  { key: 'employedDays', header: 'Days Employed' }, { key: 'attended', header: 'Total Attendance' }, { key: 'present', header: 'Present' }, { key: 'workFromHome', header: 'Work From Home' },
   { key: 'paidLeave', header: 'Paid Leave' }, { key: 'unpaidLeave', header: 'Unpaid Leave' }, { key: 'holidays', header: 'Holidays' }, { key: 'weekends', header: 'Weekends' },
   { key: 'absent', header: 'Absent' }, { key: 'lossOfPayDays', header: 'Loss Of Pay Days' }, { key: 'payableDays', header: 'Payable Days' },
 ];
@@ -149,7 +156,7 @@ export const myExpenses: RequestHandler = async (req, res) => {
   const [items, total] = await Promise.all([ExpenseClaim.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit).populate('receipt', 'originalName').lean(), ExpenseClaim.countDocuments(filter)]);
   ok(res, items, pageMeta(q, total));
 };
-export const pendingExpenses: RequestHandler = async (req, res) => ok(res, await people.pendingExpenses(req.auth!));
+export const pendingExpenses: RequestHandler = async (req, res) => ok(res, await people.pendingExpenses(req.auth!, req.valid.query.view));
 export const allExpenses: RequestHandler = async (req, res) => ok(res, await people.allExpenses(req.valid.query.status));
 export const approveExpense: RequestHandler = async (req, res) => ok(res, await people.approveExpense(ctxOf(req), req.valid.params.id));
 export const rejectExpense: RequestHandler = async (req, res) => ok(res, await people.rejectExpense(ctxOf(req), req.valid.params.id, req.valid.body.reason));

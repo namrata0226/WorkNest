@@ -1,12 +1,14 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { CalendarEvent, CalendarHoliday, CalendarLegend, LeaveCalendar, VisibleRange } from '../../components/LeaveCalendar';
-import { Button, Card, DataTable, Input, Loading, Modal, Note, PageHeader, Pagination, Select, Stat, Tabs, useToast } from '../../components/ui';
+import { Button, Card, DataTable, InfiniteLoader, Input, Loading, Modal, Note, PageHeader, Select, Stat, Tabs, useToast } from '../../components/ui';
 import { useFetch } from '../../hooks/useFetch';
+import { useInfiniteFetch } from '../../hooks/useInfiniteFetch';
 import { downloadFile } from '../../services/download';
 import type { LeaveRequest, LeaveType, Named } from '../../types';
 import { formatDate, formatMonth, todayString } from '../../utils/date';
 import { ApprovalTrail, LeaveSummary } from '../MyLeavesPage';
+import { SummaryKind, SummaryListModal } from './SummaryListModal';
 
 interface SummaryRow {
   employeeRef: string;
@@ -54,7 +56,7 @@ export function CompanyCalendarPage() {
   const [leaveType, setLeaveType] = useState('');
   const [status, setStatus] = useState('');
   const [selected, setSelected] = useState<string | null>(null);
-  const [tablePage, setTablePage] = useState(1);
+  const [listing, setListing] = useState<SummaryKind | null>(null);
   const [tableMonth, setTableMonth] = useState(todayString().slice(0, 7));
   const [exporting, setExporting] = useState<string | null>(null);
 
@@ -69,7 +71,7 @@ export function CompanyCalendarPage() {
     range ? '/calendar/company' : null,
     range ? { start: range.start, end: range.end, status, ...filters } : undefined,
   );
-  const summary = useFetch<Summary>('/calendar/summary', { month, ...filters, page: tablePage, limit: 50 });
+  const summary = useInfiniteFetch<Summary>('/calendar/summary', { month, ...filters }, { limit: 50, rowsKey: 'rows' });
 
   const onRange = (next: VisibleRange) => {
     setRange(next);
@@ -98,19 +100,21 @@ export function CompanyCalendarPage() {
         actions={
           <>
             <Tabs value={view} onChange={setView} tabs={[{ value: 'calendar', label: 'Calendar' }, { value: 'table', label: 'Table' }]} />
-            <Button loading={exporting === 'xlsx'} onClick={() => void exportAs('xlsx')}>Excel</Button>
-            <Button loading={exporting === 'csv'} onClick={() => void exportAs('csv')}>CSV</Button>
+            <Button loading={exporting === 'xlsx'} onClick={() => exportAs('xlsx')}>Excel</Button>
+            <Button loading={exporting === 'csv'} onClick={() => exportAs('csv')}>CSV</Button>
           </>
         }
       />
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
-        <Stat label="Active employees" value={c?.totalActiveEmployees ?? '–'} />
-        <Stat label="On leave this month" value={c?.employeesOnLeaveThisMonth ?? '–'} />
-        <Stat label="On leave today" value={c?.employeesCurrentlyOnLeave ?? '–'} tone="brand" />
-        <Stat label="Approved leave days" value={c?.totalApprovedLeaveDays ?? '–'} />
-        <Stat label="Pending requests" value={c?.pendingLeaveRequests ?? '–'} tone={c?.pendingLeaveRequests ? 'amber' : undefined} />
+        <Stat label="Active employees" value={c?.totalActiveEmployees ?? '–'} onClick={() => setListing('active')} />
+        <Stat label="On leave this month" value={c?.employeesOnLeaveThisMonth ?? '–'} onClick={() => setListing('onLeaveMonth')} />
+        <Stat label="On leave today" value={c?.employeesCurrentlyOnLeave ?? '–'} tone="brand" onClick={() => setListing('onLeaveToday')} />
+        <Stat label="Approved leave days" value={c?.totalApprovedLeaveDays ?? '–'} onClick={() => setListing('approvedDays')} actionLabel="View requests" />
+        <Stat label="Pending requests" value={c?.pendingLeaveRequests ?? '–'} tone={c?.pendingLeaveRequests ? 'amber' : undefined} onClick={() => setListing('pending')} actionLabel="View requests" />
         <Stat
+          onClick={() => setListing('peak')}
+          actionLabel="See who is away"
           label="Highest absence"
           value={c?.maxAbsence.count ? `${c.maxAbsence.count} people` : '–'}
           hint={c?.maxAbsence.dates.length ? `${formatDate(c.maxAbsence.dates[0])}${c.maxAbsence.dates.length > 1 ? ` +${c.maxAbsence.dates.length - 1} more` : ''}` : 'No leave this month'}
@@ -118,12 +122,12 @@ export function CompanyCalendarPage() {
       </div>
 
       <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-        <Input aria-label="Search by employee name or ID" placeholder="Search name or employee ID" value={searchText} onChange={(e) => { setSearchText(e.target.value); setTablePage(1); }} />
-        <Select aria-label="Filter by department" value={department} onChange={(e) => { setDepartment(e.target.value); setTablePage(1); }}>
-          <option value="">All departments</option>
+        <Input aria-label="Search by employee name or ID" placeholder="Search name or employee ID" value={searchText} onChange={(e) => { setSearchText(e.target.value); }} />
+        <Select aria-label="Filter by team" value={department} onChange={(e) => { setDepartment(e.target.value); }}>
+          <option value="">All teams</option>
           {departments.data?.map((d) => <option key={d._id} value={d._id}>{d.name}</option>)}
         </Select>
-        <Select aria-label="Filter by leave type" value={leaveType} onChange={(e) => { setLeaveType(e.target.value); setTablePage(1); }}>
+        <Select aria-label="Filter by leave type" value={leaveType} onChange={(e) => { setLeaveType(e.target.value); }}>
           <option value="">All leave types</option>
           {activeTypes.map((t) => <option key={t._id} value={t._id}>{t.name}</option>)}
         </Select>
@@ -134,7 +138,7 @@ export function CompanyCalendarPage() {
             <option value="PENDING">Pending only</option>
           </Select>
         ) : (
-          <Input aria-label="Month" type="month" value={tableMonth} onChange={(e) => { if (e.target.value) { setTableMonth(e.target.value); setTablePage(1); } }} />
+          <Input aria-label="Month" type="month" value={tableMonth} onChange={(e) => { if (e.target.value) { setTableMonth(e.target.value); } }} />
         )}
       </div>
 
@@ -158,7 +162,7 @@ export function CompanyCalendarPage() {
             columns={[
               { header: 'Employee Name', cell: (r) => <Link className="font-medium hover:underline" to={`/admin/employees/${r.employeeRef}`}>{r.employeeName}</Link> },
               { header: 'Employee ID', cell: (r) => r.employeeId, className: 'text-muted' },
-              { header: 'Department', cell: (r) => r.department || '—', className: 'text-muted' },
+              { header: 'Team', cell: (r) => r.department || '—', className: 'text-muted' },
               { header: 'Casual Leave', align: 'right', cell: (r) => r.casual },
               { header: 'Sick Leave', align: 'right', cell: (r) => r.sick },
               { header: 'Earned Leave', align: 'right', cell: (r) => r.earned },
@@ -167,10 +171,11 @@ export function CompanyCalendarPage() {
               { header: 'Total Leave Days', align: 'right', cell: (r) => <span className="font-semibold">{r.total}</span> },
             ]}
           />
-          <Pagination meta={summary.meta} onPage={setTablePage} />
+          <InfiniteLoader list={summary} />
         </Card>
       )}
 
+      {listing && <SummaryListModal kind={listing} month={month} filters={filters} onClose={() => setListing(null)} onOpenLeave={setSelected} />}
       {selected && <LeaveDetailsModal id={selected} onClose={() => setSelected(null)} />}
     </>
   );

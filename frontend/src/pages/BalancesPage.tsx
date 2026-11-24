@@ -1,6 +1,7 @@
 import { useState } from 'react';
-import { Card, DataTable, Note, PageHeader, Pagination, Select, TypeTag } from '../components/ui';
+import { Card, DataTable, InfiniteLoader, Note, PageHeader, Select, TypeTag } from '../components/ui';
 import { useFetch } from '../hooks/useFetch';
+import { useInfiniteFetch } from '../hooks/useInfiniteFetch';
 import type { BalanceRow, LedgerRow } from '../types';
 import { currentYear, formatDateTime } from '../utils/date';
 import { LEDGER_LABEL } from '../utils/labels';
@@ -57,9 +58,8 @@ export const yearOptions = () => {
 
 export function BalancesPage() {
   const [year, setYear] = useState(currentYear());
-  const [page, setPage] = useState(1);
   const balances = useFetch<BalanceRow[]>('/leave-balances/my', { year });
-  const ledger = useFetch<LedgerRow[]>('/leave-balances/my/transactions', { year, page, limit: 20 });
+  const ledger = useInfiniteFetch<LedgerRow[]>('/leave-balances/my/transactions', { year }, { limit: 20 });
 
   return (
     <>
@@ -67,7 +67,7 @@ export function BalancesPage() {
         title="My balances"
         subtitle="Every change is recorded below"
         actions={
-          <Select aria-label="Year" value={year} onChange={(e) => { setYear(Number(e.target.value)); setPage(1); }}>
+          <Select aria-label="Year" value={year} onChange={(e) => { setYear(Number(e.target.value)); }}>
             {yearOptions().map((y) => <option key={y} value={y}>{y}</option>)}
           </Select>
         }
@@ -76,7 +76,7 @@ export function BalancesPage() {
       <Card flush title="Balances"><BalanceTable rows={balances.data} loading={balances.loading} /></Card>
       <Card flush className="mt-4" title="Transaction history">
         <LedgerTable rows={ledger.data} loading={ledger.loading} />
-        <Pagination meta={ledger.meta} onPage={setPage} />
+        <InfiniteLoader list={ledger} />
       </Card>
     </>
   );

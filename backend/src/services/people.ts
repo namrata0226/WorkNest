@@ -12,6 +12,7 @@ import { IUser, User } from '../models/User';
 import { decryptField, encryptField } from '../utils/crypto';
 import { monthRange } from '../utils/dates';
 import { conflict, forbidden, notFound, unprocessable } from '../utils/errors';
+import { ApprovalView, approvalStatusFilter, queueSort } from '../utils/http';
 import { isDuplicateKeyError, withTransaction } from '../utils/transaction';
 import { monthForEmployees } from './attendance';
 import { audit, RequestContext } from './audit';
@@ -175,6 +176,7 @@ export async function payrollMonth(f: PayrollFilters) {
       employeeName: employee.fullName,
       department: employee.department?.name ?? '',
       employedDays,
+      attended: summary.attended,
       present: summary.present,
       workFromHome: summary.workFromHome,
       paidLeave: round(paidLeave),
@@ -217,15 +219,15 @@ const populateExpense = { path: 'employee', select: 'fullName employeeId departm
 const populateReceipt = { path: 'receipt', select: 'originalName' };
 const canManageExpenses = (auth: AuthContext) => can(auth, PERMISSIONS.EXPENSES_MANAGE);
 
-export async function pendingExpenses(auth: AuthContext) {
-  const query: Record<string, unknown> = { status: 'PENDING' };
+export async function pendingExpenses(auth: AuthContext, view?: ApprovalView) {
+  const query: Record<string, unknown> = approvalStatusFilter(view, ['APPROVED', 'PAID']);
   if (canManageExpenses(auth)) {
     if (auth.employeeId) query.employee = { $ne: auth.employeeId };
   } else {
     if (!auth.employeeId) return [];
     query.employee = { $in: (await Employee.find({ reportingManager: auth.employeeId }).select('_id').lean<IEmployee[]>()).map((e) => e._id) };
   }
-  return ExpenseClaim.find(query).sort({ createdAt: 1 }).limit(200).populate(populateExpense).populate(populateReceipt).lean();
+  return ExpenseClaim.find(query).sort(queueSort(view)).limit(200).populate(populateExpense).populate(populateReceipt).lean();
 }
 
 export const allExpenses = (status?: string) =>

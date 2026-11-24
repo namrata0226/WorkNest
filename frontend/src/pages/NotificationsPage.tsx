@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, errorMessage } from '../api/client';
-import { Button, Card, Empty, Loading, Note, PageHeader, Pagination, Tabs, useToast } from '../components/ui';
-import { useFetch } from '../hooks/useFetch';
+import { Button, Card, Empty, InfiniteLoader, Loading, Note, PageHeader, Tabs, useToast } from '../components/ui';
+import { useInfiniteFetch } from '../hooks/useInfiniteFetch';
 import type { NotificationItem } from '../types';
 import { formatDateTime } from '../utils/date';
 
@@ -10,8 +10,8 @@ export function NotificationsPage() {
   const navigate = useNavigate();
   const toast = useToast();
   const [filter, setFilter] = useState<'all' | 'unread'>('all');
-  const [page, setPage] = useState(1);
-  const { data, meta, loading, error, reload } = useFetch<NotificationItem[]>('/notifications', { page, limit: 20, unread: filter === 'unread' ? 'true' : '' });
+  const list = useInfiniteFetch<NotificationItem[]>('/notifications', { unread: filter === 'unread' ? 'true' : '' }, { limit: 20 });
+  const { data, meta, loading, error, reload } = list;
 
   const open = async (n: NotificationItem) => {
     try {
@@ -38,8 +38,8 @@ export function NotificationsPage() {
         title="Notifications"
         actions={
           <>
-            <Tabs value={filter} onChange={(v) => { setFilter(v); setPage(1); }} tabs={[{ value: 'all', label: 'All' }, { value: 'unread', label: 'Unread' }]} />
-            <Button disabled={!meta?.unread} onClick={() => void markAll()}>Mark all read</Button>
+            <Tabs value={filter} onChange={(v) => { setFilter(v); }} tabs={[{ value: 'all', label: 'All' }, { value: 'unread', label: 'Unread' }]} />
+            <Button disabled={!meta?.unread} onClick={() => markAll()}>Mark all read</Button>
           </>
         }
       />
@@ -61,7 +61,7 @@ export function NotificationsPage() {
             ))}
           </ul>
         )}
-        <Pagination meta={meta} onPage={setPage} />
+        <InfiniteLoader list={list} />
       </Card>
     </>
   );

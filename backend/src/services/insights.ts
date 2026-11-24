@@ -66,10 +66,10 @@ export async function teamCalendar(auth: AuthContext, start: string, end: string
   const colleagues = await Employee.find({ $or: or, _id: { $ne: me._id }, employmentStatus: { $ne: 'INACTIVE' } }).select('fullName avatarFile').lean<IEmployee[]>();
   const leaves = await LeaveRequest.find({ employee: { $in: colleagues.map((c) => c._id) }, status: { $in: CONFIRMED_LEAVE_STATUSES }, startDate: { $lte: end }, endDate: { $gte: start } })
     .select('employee startDate endDate dayType').lean<ILeaveRequest[]>();
-  const nameOf = new Map(colleagues.map((c) => [String(c._id), c.fullName]));
+  const byId = new Map(colleagues.map((c) => [String(c._id), c]));
   const holidays = nonOptional(await employeeHolidays(me, start, end));
   return {
-    events: leaves.map((l) => ({ id: String(l._id), employeeId: String(l.employee), employeeName: nameOf.get(String(l.employee)) ?? '', startDate: l.startDate, endDate: l.endDate, halfDay: l.dayType === 'HALF' })),
+    events: leaves.map((l) => ({ id: String(l._id), employeeId: String(l.employee), employeeName: byId.get(String(l.employee))?.fullName ?? '', avatarFile: byId.get(String(l.employee))?.avatarFile ?? null, startDate: l.startDate, endDate: l.endDate, halfDay: l.dayType === 'HALF' })),
     holidays: holidays.map((h) => ({ id: `${h._id}-${h.date}`, name: h.name, date: h.date, category: h.category, isHalfDay: h.isHalfDay })),
   };
 }

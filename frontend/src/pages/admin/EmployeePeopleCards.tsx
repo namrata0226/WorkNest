@@ -27,7 +27,7 @@ export function PrivateDetailsCard({ employeeId }: { employeeId: string }) {
       {open && data && (
         <div className="space-y-3">
           <DetailRows details={data} />
-          {data.bank && (account ? <p className="tnum text-[13px]">Account number: <strong>{account}</strong></p> : <Button small onClick={() => void reveal()}>Show full account number</Button>)}
+          {data.bank && (account ? <p className="tnum text-[13px]">Account number: <strong>{account}</strong></p> : <Button small onClick={() => reveal()}>Show full account number</Button>)}
           {data.documents?.length > 0 && (
             <ul className="text-[13px]">
               {data.documents.map((d) => <li key={d._id}><button type="button" className="text-brand hover:underline" onClick={() => downloadFile(`/files/${d._id}`, {}, d.originalName).catch((err) => toast(errorMessage(err), 'error'))}>{d.originalName}</button></li>)}
@@ -77,7 +77,7 @@ export function EmployeeChecklists({ employeeId }: { employeeId: string }) {
       ))}
       {canWrite && data && missing.length > 0 && (
         <div className="flex flex-wrap gap-2">
-          {missing.map((k) => <Button key={k} onClick={() => void run(() => api.post(`/employees/${employeeId}/checklists`, { kind: k }))}>{k === 'ONBOARDING' ? 'Start onboarding checklist' : 'Start exit checklist'}</Button>)}
+          {missing.map((k) => <Button key={k} onClick={() => run(() => api.post(`/employees/${employeeId}/checklists`, { kind: k }))}>{k === 'ONBOARDING' ? 'Start onboarding checklist' : 'Start exit checklist'}</Button>)}
         </div>
       )}
     </div>
