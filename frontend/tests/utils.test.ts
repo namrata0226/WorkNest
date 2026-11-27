@@ -100,7 +100,7 @@ describe('menu', async () => {
     expect(labels(nav)).toEqual([
       'Home:Home',
       'Leave:Apply|My requests|Balances|Comp-Off',
-      'Calendar:My calendar|Team|Holidays',
+      'Calendar:My calendar|Team & company|Holidays',
       'Attendance:My attendance',
       'Expenses:My claims',
       'Announcements:Announcements',

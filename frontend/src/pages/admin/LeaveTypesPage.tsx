@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
-import { api, applyServerErrors } from '../../api/client';
-import { Badge, Button, Card, Checkbox, CheckboxGroup, DataTable, Field, Input, Modal, Note, PageHeader, Select, TypeTag, useToast } from '../../components/ui';
+import { api, applyServerErrors, errorMessage } from '../../api/client';
+import { Badge, Button, Card, Checkbox, CheckboxGroup, DataTable, Field, Input, Modal, Note, PageHeader, Select, TypeTag, useConfirm, useToast } from '../../components/ui';
 import { useFetch } from '../../hooks/useFetch';
 import type { LeaveType } from '../../types';
 import { todayString } from '../../utils/date';
@@ -50,13 +50,36 @@ export function LeaveTypesPage() {
           ]}
         />
       </Card>
-      {editing && <TypeModal type={editing === 'new' ? null : editing} onClose={() => setEditing(null)} onDone={() => { setEditing(null); toast('Leave type saved'); void reload(); }} />}
+      {editing && <TypeModal type={editing === 'new' ? null : editing} onClose={() => setEditing(null)} onDone={(message) => { setEditing(null); toast(message); void reload(); }} />}
     </>
   );
 }
 
-function TypeModal({ type, onClose, onDone }: { type: LeaveType | null; onClose: () => void; onDone: () => void }) {
+function TypeModal({ type, onClose, onDone }: { type: LeaveType | null; onClose: () => void; onDone: (message: string) => void }) {
+  const confirm = useConfirm();
   const [formError, setFormError] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
+
+  const remove = async () => {
+    if (!type) return;
+    const ok = await confirm({
+      title: `Delete ${type.name}?`,
+      message: 'This removes the leave type and its unused balances. A type someone has already applied for cannot be deleted. Untick Active to retire it instead.',
+      confirmLabel: 'Delete leave type',
+      tone: 'danger',
+    });
+    if (!ok) return;
+    setFormError(null);
+    setDeleting(true);
+    try {
+      await api.delete(`/leave-types/${type._id}`);
+      onDone(`${type.name} deleted`);
+    } catch (err) {
+      setFormError(errorMessage(err));
+    } finally {
+      setDeleting(false);
+    }
+  };
   const { register, handleSubmit, setError, control, watch, formState: { errors, isSubmitting } } = useForm<TypeForm>({
     defaultValues: type
       ? { ...type, maxDurationText: asText(type.maxDuration), documentAfterText: asText(type.documentRequiredAfterDays), carryExpiryText: asText(type.carryForwardExpiryDays), maxNegativeText: asText(type.maxNegative), maxPerMonthText: asText(type.maxRequestsPerMonth), effectiveFrom: todayString() }
@@ -80,7 +103,7 @@ function TypeModal({ type, onClose, onDone }: { type: LeaveType | null; onClose:
     try {
       if (type) await api.put(`/leave-types/${type._id}`, body);
       else await api.post('/leave-types', body);
-      onDone();
+      onDone('Leave type saved');
     } catch (err) {
       setFormError(applyServerErrors(err, setError, ['name', 'code', 'color'] as const));
     }
@@ -93,7 +116,11 @@ function TypeModal({ type, onClose, onDone }: { type: LeaveType | null; onClose:
       wide
       title={type ? `Edit ${type.name}` : 'Add leave type'}
       onClose={onClose}
-      footer={<><Button onClick={onClose}>Cancel</Button><Button variant="primary" type="submit" form="type-form" loading={isSubmitting}>Save</Button></>}
+      footer={<>
+        {type && <Button variant="danger" className="mr-auto" onClick={remove} loading={deleting} disabled={isSubmitting}>Delete</Button>}
+        <Button onClick={onClose}>Cancel</Button>
+        <Button variant="primary" type="submit" form="type-form" loading={isSubmitting} disabled={deleting}>Save</Button>
+      </>}
     >
       <form id="type-form" className="grid gap-3 sm:grid-cols-3" onSubmit={handleSubmit(onSubmit)} noValidate>
         {formError && <div className="sm:col-span-3"><Note>{formError}</Note></div>}

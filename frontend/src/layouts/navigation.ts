@@ -45,7 +45,7 @@ export const NAV: NavGroup[] = [
         label: 'Calendar',
         tabs: [
           { to: '/calendar', label: 'My calendar', employeeOnly: true },
-          { to: '/team-calendar', label: 'Team', employeeOnly: true },
+          { to: '/team-calendar', label: 'Team & company', employeeOnly: true },
           { to: '/admin/calendar', label: 'Company', permission: 'calendar:read' },
           { to: '/holidays', label: 'Holidays' },
         ],

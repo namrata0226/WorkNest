@@ -17,7 +17,7 @@ export const punchOut: RequestHandler = async (req, res) => ok(res, await servic
 export const daily: RequestHandler = async (req, res) => {
   const q = req.valid.query;
   const date = q.date ?? todayIn((await getSettings()).timezone);
-  const result = await service.dailyAttendance({ date, department: q.department, search: q.search });
+  const result = await service.dailyAttendance({ date, department: q.department, search: q.search, status: q.status });
   const { skip, limit } = pageOptions(q, [], 'date');
   ok(res, { ...result, rows: result.rows.slice(skip, skip + limit) }, pageMeta(q, result.rows.length));
 };

@@ -59,3 +59,46 @@ const resetSchema = new Schema<IPasswordResetToken>(
 resetSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 60 * 60 * 24 });
 
 export const PasswordResetToken = model<IPasswordResetToken>('PasswordResetToken', resetSchema);
+
+export type OtpChannel = 'EMAIL';
+
+/**
+ * The step between a correct password and a session. The password alone signs nobody in:
+ * the person must also prove they hold the email inbox with a one-time code.
+ */
+export interface ILoginChallenge {
+  _id: Types.ObjectId;
+  user: Types.ObjectId;
+  tokenHash: string;
+  channel: OtpChannel | null;
+  codeHash: string | null;
+  codeExpiresAt: Date | null;
+  lastSentAt: Date | null;
+  sendCount: number;
+  attempts: number;
+  consumedAt: Date | null;
+  expiresAt: Date;
+  userAgent: string | null;
+  ip: string | null;
+}
+
+const challengeSchema = new Schema<ILoginChallenge>(
+  {
+    user: { type: Schema.Types.ObjectId, ref: 'User', required: true, index: true },
+    tokenHash: { type: String, required: true, unique: true },
+    channel: { type: String, enum: ['EMAIL'], default: null },
+    codeHash: { type: String, default: null },
+    codeExpiresAt: { type: Date, default: null },
+    lastSentAt: { type: Date, default: null },
+    sendCount: { type: Number, default: 0 },
+    attempts: { type: Number, default: 0 },
+    consumedAt: { type: Date, default: null },
+    expiresAt: { type: Date, required: true },
+    userAgent: { type: String, default: null },
+    ip: { type: String, default: null },
+  },
+  { timestamps: true, collection: 'loginChallenges' },
+);
+challengeSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 60 * 60 });
+
+export const LoginChallenge = model<ILoginChallenge>('LoginChallenge', challengeSchema);

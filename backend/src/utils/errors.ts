@@ -9,6 +9,8 @@ export class AppError extends Error {
     public readonly code: string,
     message: string,
     public readonly details?: ErrorDetail[],
+    /** Extra facts the client acts on, such as when a lockout ends. Never internals. */
+    public readonly meta?: Record<string, unknown>,
   ) {
     super(message);
     this.name = 'AppError';

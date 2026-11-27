@@ -26,6 +26,8 @@ export function buildApiRouter(limits: ReturnType<typeof createLimiters>): Route
   /* Authentication */
   const auth = Router();
   auth.post('/login', limits.login, validate({ body: v.loginBody }), authC.login);
+  auth.post('/otp/send', limits.otp, validate({ body: v.otpSendBody }), authC.sendOtp);
+  auth.post('/otp/verify', limits.otp, validate({ body: v.otpVerifyBody }), authC.verifyOtp);
   auth.post('/refresh', limits.sensitive, authC.refresh);
   auth.post('/logout', authC.logout);
   auth.post('/forgot-password', limits.auth, validate({ body: v.forgotBody }), authC.forgotPassword);
@@ -103,7 +105,7 @@ export function buildApiRouter(limits: ReturnType<typeof createLimiters>): Route
 
   /* Insight and the team calendar */
   api.get('/insights/hr', requirePermission(P.REPORTS_READ), peopleC.insights);
-  api.get('/calendar/team', requireEmployeeProfile, validate({ query: v.dateRangeQuery }), peopleC.calendar);
+  api.get('/calendar/team', requireEmployeeProfile, validate({ query: v.teamCalendarQuery }), peopleC.calendar);
 
   /* Self-service: acts only on the signed-in employee */
   const me = Router();
@@ -215,6 +217,7 @@ export function buildApiRouter(limits: ReturnType<typeof createLimiters>): Route
   api.get('/leave-types/available', requireEmployeeProfile, leaveC.availableTypes);
   api.post('/leave-types', requirePermission(P.LEAVE_POLICY_MANAGE), validate({ body: v.leaveTypeCreateBody }), policyC.createType);
   api.put('/leave-types/:id', requirePermission(P.LEAVE_POLICY_MANAGE), validate({ params: idParams, body: v.leaveTypeUpdateBody }), policyC.updateType);
+  api.delete('/leave-types/:id', requirePermission(P.LEAVE_POLICY_MANAGE), validate({ params: idParams }), policyC.deleteType);
   api.get('/leave-policies', requirePermission(P.LEAVE_POLICY_MANAGE), policyC.listPolicies);
   api.post('/leave-policies', requirePermission(P.LEAVE_POLICY_MANAGE), validate({ body: v.policyCreateBody }), policyC.createPolicy);
   api.put('/leave-policies/:id', requirePermission(P.LEAVE_POLICY_MANAGE), validate({ params: idParams, body: v.policyUpdateBody }), policyC.updatePolicy);

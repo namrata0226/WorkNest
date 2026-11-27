@@ -2,10 +2,26 @@ import { createContext, ReactNode, useCallback, useContext, useEffect, useMemo, 
 import { api, AUTH_EXPIRED_EVENT } from '../api/client';
 import type { CurrentUser, Permission } from '../types';
 
+export interface LoginChallenge {
+  challengeToken: string;
+  expiresAt: string;
+  /** The account email the code goes to, partly hidden. */
+  destination: string;
+}
+
+export interface OtpSent {
+  destination: string;
+  resendAt: string;
+  codeExpiresAt: string;
+}
+
 interface AuthValue {
   user: CurrentUser | null;
   ready: boolean;
-  login: (email: string, password: string) => Promise<void>;
+  /** Checks the password. Nobody is signed in until a one-time code is verified. */
+  login: (email: string, password: string) => Promise<LoginChallenge>;
+  sendOtp: (challengeToken: string) => Promise<OtpSent>;
+  verifyOtp: (challengeToken: string, code: string) => Promise<void>;
   logout: () => Promise<void>;
   refreshProfile: () => Promise<void>;
   can: (permission: Permission) => boolean;
@@ -33,8 +49,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     user,
     ready,
     refreshProfile,
-    login: async (email, password) => {
-      const res = await api.post('/auth/login', { email, password });
+    login: async (email, password) => (await api.post('/auth/login', { email, password })).data.data,
+    sendOtp: async (challengeToken) => (await api.post('/auth/otp/send', { challengeToken })).data.data,
+    verifyOtp: async (challengeToken, code) => {
+      const res = await api.post('/auth/otp/verify', { challengeToken, code });
       setUser(res.data.data);
     },
     logout: async () => {

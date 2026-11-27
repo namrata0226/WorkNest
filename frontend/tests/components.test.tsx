@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import type { LoginChallenge } from '../src/context/AuthContext';
 import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
@@ -20,6 +21,7 @@ import { AccountPage, LoginPage } from '../src/pages/AuthPages';
 import { AttendancePage, PunchCard } from '../src/pages/AttendancePage';
 import { EmailActionPage } from '../src/pages/EmailActionPage';
 import { SelfService } from '../src/pages/SelfServicePage';
+import { LeaveTypesPage } from '../src/pages/admin/LeaveTypesPage';
 import { RequireAuth, RequirePermission } from '../src/routes/AppRoutes';
 import type { CurrentUser } from '../src/types';
 
@@ -84,12 +86,15 @@ describe('opening a link from an email', () => {
 
   it('asks a signed-out person to sign in, then goes to the home screen', async () => {
     mockApi({}, null);
-    vi.spyOn(api, 'post').mockResolvedValue({ data: { data: asEmployee } });
+    mockLoginFlow();
     renderApp(app, '/approvals?request=abc123');
     const user = userEvent.setup();
     await user.type(await screen.findByLabelText(/Email/), 's@x.co');
     await user.type(screen.getByLabelText(/Password/), 'secret-pass-1');
     await user.click(screen.getByRole('button', { name: /sign in/i }));
+    await user.click(await screen.findByRole('button', { name: 'Send OTP' }));
+    // Typing the last digit submits by itself.
+    await user.type(await screen.findByLabelText('Digit 1 of 6'), '123456');
     expect(await screen.findByTestId('location')).toHaveTextContent(/^\/$/);
   });
 
@@ -100,7 +105,69 @@ describe('opening a link from an email', () => {
   });
 });
 
+const CHALLENGE: LoginChallenge = {
+  challengeToken: 'c'.repeat(43),
+  expiresAt: new Date(Date.now() + 600_000).toISOString(),
+  destination: 's*****@x.co',
+};
+
+/** Password, then a code, then verification, each answered as the server would. */
+function mockLoginFlow(challenge: LoginChallenge = CHALLENGE) {
+  return vi.spyOn(api, 'post').mockImplementation(async (url: string) => {
+    if (url === '/auth/login') return { data: { data: challenge } };
+    if (url === '/auth/otp/send') {
+      return { data: { data: { destination: challenge.destination, resendAt: new Date(Date.now() + 30_000).toISOString(), codeExpiresAt: new Date(Date.now() + 300_000).toISOString() } } };
+    }
+    if (url === '/auth/otp/verify') return { data: { data: asEmployee } };
+    throw new Error(`unexpected ${url}`);
+  });
+}
+
 describe('login page', () => {
+  it('emails the code with no mobile option, then shows six boxes and a 30 second resend timer', async () => {
+    mockApi({}, null);
+    const post = mockLoginFlow();
+    renderApp(<LoginPage />);
+    const user = userEvent.setup();
+    await user.type(await screen.findByLabelText('Email'), 's@x.co');
+    await user.type(screen.getByLabelText('Password'), 'secret-pass-1');
+    await user.click(screen.getByRole('button', { name: 'Sign in' }));
+    expect(await screen.findByText('s*****@x.co')).toBeInTheDocument();
+    expect(screen.queryByText(/mobile/i)).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Send OTP' }));
+    expect(post).toHaveBeenCalledWith('/auth/otp/send', { challengeToken: CHALLENGE.challengeToken });
+    expect(await screen.findAllByLabelText(/Digit \d of 6/)).toHaveLength(6);
+    expect(screen.getByText(/resend in/)).toHaveTextContent(/0:(30|29)/);
+    expect(screen.queryByRole('button', { name: /resend OTP/i })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Verify OTP' })).toBeDisabled();
+  });
+
+  it('fills every box from a pasted code and signs in', async () => {
+    mockApi({}, null);
+    const post = mockLoginFlow();
+    renderApp(<LoginPage />);
+    const user = userEvent.setup();
+    await user.type(await screen.findByLabelText('Email'), 's@x.co');
+    await user.type(screen.getByLabelText('Password'), 'secret-pass-1');
+    await user.click(screen.getByRole('button', { name: 'Sign in' }));
+    await user.click(await screen.findByRole('button', { name: 'Send OTP' }));
+    await user.click(await screen.findByLabelText('Digit 1 of 6'));
+    await user.paste('123456');
+    expect(post).toHaveBeenCalledWith('/auth/otp/verify', { challengeToken: CHALLENGE.challengeToken, code: '123456' });
+  });
+
+  it('shows a countdown while the account is locked and keeps Sign in disabled', async () => {
+    mockApi({}, null);
+    const lockedUntil = new Date(Date.now() + 15 * 60_000).toISOString();
+    vi.spyOn(api, 'post').mockRejectedValue({ response: { status: 423, data: { error: { code: 'ACCOUNT_LOCKED', message: 'Locked', meta: { lockedUntil } } } } });
+    renderApp(<LoginPage />);
+    await userEvent.type(await screen.findByLabelText('Email'), 'a@b.co');
+    await userEvent.type(screen.getByLabelText('Password'), 'wrong');
+    await userEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+    expect(await screen.findByText(/(15:00|14:59)/, { selector: 'span' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Locked/ })).toBeDisabled();
+  });
+
   it('validates before calling the server', async () => {
     mockApi({}, null);
     const post = vi.spyOn(api, 'post');
@@ -951,5 +1018,43 @@ describe('editing my own profile', () => {
     await user.selectOptions(within(dialog).getByLabelText(/^Gender/), 'FEMALE');
     await user.click(within(dialog).getByRole('button', { name: 'Save changes' }));
     await waitFor(() => expect(put).toHaveBeenCalledWith('/employees/e1', expect.objectContaining({ gender: 'FEMALE', email: 's@x.co' })));
+  });
+});
+
+describe('deleting a leave type', () => {
+  const study = { _id: 'lt1', name: 'Study Leave', code: 'STUD', kind: 'STANDARD', color: '#123456', isPaid: true, annualEntitlement: 3, monthlyAccrual: 0, carryForward: false, maxCarryForward: 0, halfDayAllowed: true, isActive: true, applicableCategories: [], applicableGenders: [] };
+
+  it('asks first, then deletes and says so', async () => {
+    mockApi({ '/leave-types': [study] });
+    const del = vi.spyOn(api, 'delete').mockClear().mockResolvedValue({ data: { data: { deleted: true } } });
+    renderApp(<LeaveTypesPage />);
+    const user = userEvent.setup();
+    await user.click(await screen.findByText('Study Leave'));
+    await user.click(screen.getByRole('button', { name: 'Delete' }));
+    expect(await screen.findByText('Delete Study Leave?')).toBeInTheDocument();
+    expect(del).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: 'Delete leave type' }));
+    await waitFor(() => expect(del).toHaveBeenCalledWith('/leave-types/lt1'));
+    expect(await screen.findByText('Study Leave deleted')).toBeInTheDocument();
+  });
+
+  it('shows why a type in use cannot be deleted and keeps the form open', async () => {
+    mockApi({ '/leave-types': [study] });
+    vi.spyOn(api, 'delete').mockClear().mockRejectedValue(Object.assign(new Error('x'), { isAxiosError: true, response: { status: 409, data: { error: { code: 'LEAVE_TYPE_IN_USE', message: 'Study Leave cannot be deleted because it has 2 leave applications. Mark it inactive instead.' } } } }));
+    renderApp(<LeaveTypesPage />);
+    const user = userEvent.setup();
+    await user.click(await screen.findByText('Study Leave'));
+    await user.click(screen.getByRole('button', { name: 'Delete' }));
+    await user.click(await screen.findByRole('button', { name: 'Delete leave type' }));
+    expect(await screen.findByText(/has 2 leave applications/)).toBeInTheDocument();
+    expect(screen.getByText('Edit Study Leave')).toBeInTheDocument();
+  });
+
+  it('offers no delete when adding a new type', async () => {
+    mockApi({ '/leave-types': [] });
+    renderApp(<LeaveTypesPage />);
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'Add leave type' }));
+    expect(screen.queryByRole('button', { name: 'Delete' })).not.toBeInTheDocument();
   });
 });

@@ -1,12 +1,13 @@
 import { zodResolver } from '@hookform/resolvers/zod';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { Link, Navigate, useNavigate, useSearchParams } from 'react-router-dom';
 import { z } from 'zod';
-import { api, applyServerErrors, errorMessage } from '../api/client';
+import { api, applyServerErrors, errorCode, errorMessage, errorMeta } from '../api/client';
 import { Avatar } from '../components/Avatar';
-import { Button, Card, Field, Input, Modal, Note, PageHeader, PasswordInput, StatusBadge, useConfirm, useToast } from '../components/ui';
-import { useAuth } from '../context/AuthContext';
+import { Button, Card, cx, Field, Input, Modal, Note, PageHeader, PasswordInput, StatusBadge, useConfirm, useToast } from '../components/ui';
+import { Icon } from '../components/icons';
+import { LoginChallenge, OtpSent, useAuth } from '../context/AuthContext';
 import { AuthLayout } from '../layouts/AppLayout';
 import { uploadAvatar } from '../services/download';
 import { SelfService } from './SelfServicePage';
@@ -16,34 +17,250 @@ import type { Employee } from '../types';
 import { ROLE_LABEL, titleCase } from '../utils/labels';
 import { changePasswordSchema, forgotSchema, LoginForm, loginSchema, ProfileForm, profileSchema, resetSchema } from '../validations';
 
+/** Seconds until a moment, ticking once a second. Zero once it has passed or when there is none. */
+function useSecondsUntil(iso: string | null): number {
+  const left = () => (iso ? Math.max(0, Math.ceil((new Date(iso).getTime() - Date.now()) / 1000)) : 0);
+  const [seconds, setSeconds] = useState(left);
+  useEffect(() => {
+    setSeconds(left());
+    if (!iso) return;
+    const timer = window.setInterval(() => {
+      const next = left();
+      setSeconds(next);
+      if (next === 0) window.clearInterval(timer);
+    }, 1000);
+    return () => window.clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [iso]);
+  return seconds;
+}
+
+const clock = (seconds: number) => `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+
+const OTP_LENGTH = 6;
+
+/** Six boxes for the code: typing moves along, Backspace moves back, and pasting fills them all. */
+function OtpInput({ value, onChange, onComplete, disabled, invalid }: { value: string; onChange: (v: string) => void; onComplete: (v: string) => void; disabled?: boolean; invalid?: boolean }) {
+  const refs = useRef<(HTMLInputElement | null)[]>([]);
+  const focusAt = (i: number) => refs.current[Math.max(0, Math.min(OTP_LENGTH - 1, i))]?.focus();
+  const digits = Array.from({ length: OTP_LENGTH }, (_, i) => value[i] ?? '');
+
+  const setFrom = (start: number, typed: string) => {
+    const clean = typed.replace(/\D/g, '');
+    if (!clean) return;
+    const next = (value.slice(0, start) + clean).slice(0, OTP_LENGTH);
+    onChange(next);
+    focusAt(next.length);
+    if (next.length === OTP_LENGTH) onComplete(next);
+  };
+
+  return (
+    <div className="flex justify-center gap-2 sm:gap-2.5" onPaste={(e) => { e.preventDefault(); setFrom(0, e.clipboardData.getData('text')); }}>
+      {digits.map((d, i) => (
+        <input
+          key={i}
+          ref={(el) => { refs.current[i] = el; }}
+          aria-label={`Digit ${i + 1} of ${OTP_LENGTH}`}
+          inputMode="numeric"
+          autoComplete={i === 0 ? 'one-time-code' : 'off'}
+          maxLength={OTP_LENGTH}
+          disabled={disabled}
+          autoFocus={i === 0}
+          value={d}
+          onFocus={(e) => e.target.select()}
+          onChange={(e) => setFrom(i, e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Backspace') {
+              e.preventDefault();
+              const at = d ? i : i - 1;
+              if (at < 0) return;
+              onChange(value.slice(0, at));
+              focusAt(at);
+            } else if (e.key === 'ArrowLeft') focusAt(i - 1);
+            else if (e.key === 'ArrowRight') focusAt(i + 1);
+          }}
+          className={cx(
+            'h-12 w-10 rounded-xl border bg-surface text-center text-[22px] font-semibold tabular-nums outline-none transition-all sm:h-14 sm:w-12',
+            'focus:border-brand focus:ring-4 focus:ring-brand/15',
+            invalid ? 'border-rose/60 text-rose' : d ? 'border-brand/50' : 'border-line-strong',
+            disabled && 'opacity-60',
+          )}
+        />
+      ))}
+    </div>
+  );
+}
+
+/** A round icon above each sign-in step. */
+const StepIcon = ({ name }: { name: 'mail' | 'shield' }) => (
+  <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-brand-soft text-brand ring-8 ring-brand-soft/40">
+    <Icon name={name} size={26} />
+  </div>
+);
+
+type Step = 'password' | 'send' | 'code';
+
 export function LoginPage() {
-  const { user, ready, login } = useAuth();
+  const { user, ready, login, sendOtp, verifyOtp } = useAuth();
+  const [step, setStep] = useState<Step>('password');
   const [error, setError] = useState<string | null>(null);
+  const [lockedUntil, setLockedUntil] = useState<string | null>(null);
+  const [challenge, setChallenge] = useState<LoginChallenge | null>(null);
+  const [sent, setSent] = useState<OtpSent | null>(null);
+  const [resendAt, setResendAt] = useState<string | null>(null);
+  const [code, setCode] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [resent, setResent] = useState(false);
   const { register, handleSubmit, formState: { errors, isSubmitting } } = useForm<LoginForm>({ resolver: zodResolver(loginSchema) });
+
+  const lockSeconds = useSecondsUntil(lockedUntil);
+  const resendSeconds = useSecondsUntil(resendAt);
+  const codeSeconds = useSecondsUntil(sent?.codeExpiresAt ?? null);
 
   // Signing in sets the user, and every sign-in lands on the home screen, whatever page sent them here.
   if (ready && user) return <Navigate to="/" replace />;
 
-  const onSubmit = async (values: LoginForm) => {
+  const restart = (message: string | null) => {
+    setStep('password');
+    setChallenge(null);
+    setSent(null);
+    setResendAt(null);
+    setCode('');
+    setError(message);
+  };
+
+  /** Errors that end this sign-in send the person back to the password step. */
+  const handleError = (err: unknown) => {
+    const codeName = errorCode(err);
+    const meta = errorMeta(err);
+    if (codeName === 'ACCOUNT_LOCKED') {
+      restart(null);
+      setLockedUntil(typeof meta.lockedUntil === 'string' ? meta.lockedUntil : null);
+      return;
+    }
+    if (codeName === 'LOGIN_CHALLENGE_EXPIRED' || codeName === 'OTP_SEND_LIMIT') return restart(errorMessage(err));
+    if (codeName === 'OTP_RESEND_WAIT' && typeof meta.resendAt === 'string') setResendAt(meta.resendAt);
+    setError(errorMessage(err));
+  };
+
+  const onPassword = async (values: LoginForm) => {
     setError(null);
     try {
-      await login(values.email, values.password);
+      const next = await login(values.email, values.password);
+      setLockedUntil(null);
+      setChallenge(next);
+      setStep('send');
     } catch (err) {
-      setError(errorMessage(err));
+      handleError(err);
     }
   };
 
+  const onSend = async (again = false) => {
+    if (!challenge) return;
+    setError(null);
+    setBusy(true);
+    try {
+      const result = await sendOtp(challenge.challengeToken);
+      setSent(result);
+      setResendAt(result.resendAt);
+      setCode('');
+      setResent(again);
+      setStep('code');
+    } catch (err) {
+      handleError(err);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onVerify = async (value = code) => {
+    if (!challenge || busy) return;
+    if (value.length !== OTP_LENGTH) return setError('Enter all 6 digits of the code');
+    setError(null);
+    setBusy(true);
+    try {
+      await verifyOtp(challenge.challengeToken, value);
+    } catch (err) {
+      setCode('');
+      handleError(err);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const locked = lockSeconds > 0;
+  const backLink = <button type="button" className="inline-flex items-center gap-1 text-xs font-medium text-muted hover:text-ink" onClick={() => restart(null)}><Icon name="chevronLeft" size={14} />Back to sign in</button>;
+
+  if (step === 'send' && challenge) {
+    return (
+      <AuthLayout title="Verify it's you" subtitle="One more step to keep your account safe">
+        <div className="space-y-4 text-center">
+          <StepIcon name="mail" />
+          {error && <div className="text-left"><Note>{error}</Note></div>}
+          <div className="rounded-xl border border-line bg-paper/60 px-4 py-3">
+            <div className="text-xs text-muted">We'll email a 6-digit code to</div>
+            <div className="mt-0.5 text-[15px] font-semibold">{challenge.destination}</div>
+          </div>
+          <Button variant="primary" className="w-full" loading={busy} disabled={resendSeconds > 0} onClick={() => onSend(false)}>
+            {resendSeconds > 0 ? `Send OTP in ${clock(resendSeconds)}` : 'Send OTP'}
+          </Button>
+          <div className="flex items-center justify-center gap-4">
+            {sent && <button type="button" className="text-xs font-medium text-brand hover:underline" onClick={() => { setError(null); setStep('code'); }}>I already have a code</button>}
+            {backLink}
+          </div>
+        </div>
+      </AuthLayout>
+    );
+  }
+
+  if (step === 'code' && challenge && sent) {
+    return (
+      <AuthLayout title="Enter your code" subtitle="Check your inbox for the 6-digit code">
+        <form className="space-y-5 text-center" onSubmit={(e) => { e.preventDefault(); void onVerify(); }} noValidate>
+          <StepIcon name="shield" />
+          <p className="text-[13px] text-muted">
+            {resent ? 'A new code was sent to ' : 'We sent a code to '}
+            <span className="font-semibold text-ink">{sent.destination}</span>
+          </p>
+          {error && <div className="text-left"><Note>{error}</Note></div>}
+          <OtpInput value={code} onChange={(v) => { setCode(v); if (error) setError(null); }} onComplete={(v) => void onVerify(v)} disabled={busy} invalid={Boolean(error)} />
+          <p className={cx('text-xs tabular-nums', codeSeconds > 0 ? 'text-muted' : 'text-rose')} aria-live="polite">
+            {codeSeconds > 0 ? <>Code expires in <span className="font-semibold">{clock(codeSeconds)}</span></> : 'This code has expired. Ask for a new one.'}
+          </p>
+          <Button type="submit" variant="primary" className="w-full" loading={busy} disabled={code.length !== OTP_LENGTH}>Verify OTP</Button>
+          <div className="rounded-xl bg-paper/60 px-4 py-3 text-xs text-muted">
+            Didn't get it? Check your spam folder, or{' '}
+            {resendSeconds > 0 ? (
+              <span aria-live="polite">resend in <span className="font-semibold tabular-nums text-ink">{clock(resendSeconds)}</span></span>
+            ) : (
+              <button type="button" className="font-semibold text-brand hover:underline" disabled={busy} onClick={() => void onSend(true)}>resend OTP</button>
+            )}
+          </div>
+          <div>{backLink}</div>
+        </form>
+      </AuthLayout>
+    );
+  }
+
   return (
     <AuthLayout title="Sign in" subtitle="Use your work email">
-      <form className="space-y-3" onSubmit={handleSubmit(onSubmit)} noValidate>
-        {error && <Note>{error}</Note>}
+      <form className="space-y-3" onSubmit={handleSubmit(onPassword)} noValidate>
+        {locked ? (
+          <Note tone="amber">
+            <span className="font-medium">Account locked after too many failed attempts.</span> You can try again in <span className="font-semibold tabular-nums" aria-live="polite">{clock(lockSeconds)}</span>.
+          </Note>
+        ) : lockedUntil ? (
+          <Note tone="green">Your account is unlocked. You can sign in now.</Note>
+        ) : error && <Note>{error}</Note>}
         <Field label="Email" error={errors.email?.message}>
           <Input type="email" autoComplete="username" autoFocus {...register('email')} />
         </Field>
         <Field label="Password" error={errors.password?.message}>
           <PasswordInput autoComplete="current-password" {...register('password')} />
         </Field>
-        <Button type="submit" variant="primary" className="w-full" loading={isSubmitting}>Sign in</Button>
+        <Button type="submit" variant="primary" className="w-full" loading={isSubmitting} disabled={locked}>
+          {locked ? `Locked · ${clock(lockSeconds)}` : 'Sign in'}
+        </Button>
         <p className="text-center text-xs"><Link className="text-brand hover:underline" to="/forgot-password">Forgot your password?</Link></p>
       </form>
     </AuthLayout>

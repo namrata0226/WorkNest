@@ -4,7 +4,7 @@ Base path: `/api`. All bodies are JSON unless marked as a file upload.
 
 ## Conventions
 
-**Authentication.** Sign in with `POST /auth/login`. Tokens are set as `HttpOnly`, `SameSite=Strict` cookies (`Secure` in production) and are never returned in a response body. Everything except the public auth routes needs a session.
+**Authentication.** Sign in takes three calls: `POST /auth/login` checks the password and returns a short-lived challenge, `POST /auth/otp/send` emails a 6-digit code to the account, and `POST /auth/otp/verify` completes the sign-in. Tokens are set as `HttpOnly`, `SameSite=Strict` cookies (`Secure` in production) and are never returned in a response body. Everything except the public auth routes needs a session.
 
 **CSRF header.** Every state-changing request must send `X-Requested-With: WorkNest`, or it gets a `403`.
 
@@ -49,7 +49,9 @@ Access column: **Any** is any signed-in user, **Self** requires an employee prof
 
 | Method and path | Access | Notes |
 |---|---|---|
-| POST `/auth/login` | Public, rate limited | `{ email, password }` |
+| POST `/auth/login` | Public, rate limited | `{ email, password }`. Sets no cookie. Returns `{ challengeToken, expiresAt, destination }` (the masked email), valid 10 minutes. After 3 wrong passwords (Settings → Security) the account locks for 15 minutes: `423 ACCOUNT_LOCKED` with `meta.lockedUntil` and `meta.retryAfterSeconds`, even for the right password. |
+| POST `/auth/otp/send` | Public, rate limited | `{ challengeToken }`. Emails the code. A new code replaces the last one and lasts 5 minutes. Resending waits 30 seconds (`429 OTP_RESEND_WAIT`, `meta.resendAt`); 5 sends per challenge. |
+| POST `/auth/otp/verify` | Public, rate limited | `{ challengeToken, code }`. Sets the session cookies and returns the profile. Five wrong codes end the challenge (`LOGIN_CHALLENGE_EXPIRED`); `INVALID_OTP` carries `meta.attemptsLeft`. |
 | POST `/auth/refresh` | Refresh cookie | Rotates the token. Replaying an old one revokes the session. |
 | POST `/auth/logout` | Public | Revokes the session on the server |
 | POST `/auth/forgot-password` | Public, rate limited | Same answer whether or not the account exists |
@@ -192,6 +194,7 @@ An event covers one run of charged days, so a Friday-to-Monday leave returns two
 |---|---|
 | GET `/leave-types` | Any (active types only without the permission below) |
 | POST `/leave-types`, PUT `/leave-types/:id` | `leave_policy:manage`. Includes `applicableGenders` (empty means everyone) and `maxRequestsPerMonth` (`null` means no limit). A breach returns `422` with code `MONTHLY_LIMIT_REACHED`. |
+| DELETE `/leave-types/:id` | `leave_policy:manage`. Deletes a type nobody has used, with its automatic balances and any policy or workflow rules for it. A type with leave applications, adjustments or credits returns `409` with code `LEAVE_TYPE_IN_USE`; mark it inactive instead. |
 | GET, POST `/leave-policies`, PUT `/leave-policies/:id` | `leave_policy:manage` |
 | GET, POST `/workflows`, PUT `/workflows/:id` | `workflows:manage` |
 

@@ -17,7 +17,7 @@ function refreshSession(): Promise<void> {
   return refreshing;
 }
 
-const NO_RETRY = ['/auth/login', '/auth/refresh', '/auth/logout', '/auth/forgot-password', '/auth/reset-password'];
+const NO_RETRY = ['/auth/login', '/auth/otp/', '/auth/refresh', '/auth/logout', '/auth/forgot-password', '/auth/reset-password'];
 
 api.interceptors.response.use(undefined, async (error: AxiosError) => {
   const config = error.config as (InternalAxiosRequestConfig & { _retried?: boolean }) | undefined;
@@ -35,7 +35,7 @@ api.interceptors.response.use(undefined, async (error: AxiosError) => {
   return api.request(config);
 });
 
-interface ApiErrorBody { error?: { code?: string; message?: string; details?: ApiFieldError[] } }
+interface ApiErrorBody { error?: { code?: string; message?: string; details?: ApiFieldError[]; meta?: Record<string, unknown> } }
 
 export function errorMessage(err: unknown, fallback = 'Something went wrong. Please try again.'): string {
   const axiosErr = err as AxiosError<ApiErrorBody> | undefined;
@@ -52,6 +52,11 @@ export function errorMessage(err: unknown, fallback = 'Something went wrong. Ple
 
 export function errorCode(err: unknown): string | undefined {
   return (err as AxiosError<ApiErrorBody>)?.response?.data?.error?.code;
+}
+
+/** Extra facts the server sends with some errors, such as when a lockout ends. */
+export function errorMeta(err: unknown): Record<string, unknown> {
+  return (err as AxiosError<ApiErrorBody>)?.response?.data?.error?.meta ?? {};
 }
 
 export function fieldErrors(err: unknown): ApiFieldError[] {

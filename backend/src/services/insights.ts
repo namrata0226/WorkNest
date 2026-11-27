@@ -57,19 +57,31 @@ export async function hrInsights() {
 }
 
 /** Colleagues who are away. Never says what kind of leave it is, as that can be private. */
-export async function teamCalendar(auth: AuthContext, start: string, end: string) {
+export interface TeamCalendarOptions { scope?: 'team' | 'company'; department?: string }
+
+/**
+ * Who is away, for everyone: by default the caller's team, or the whole company (optionally one team).
+ * Only dates and names are shared. Leave types and reasons stay private.
+ */
+export async function teamCalendar(auth: AuthContext, start: string, end: string, opts: TeamCalendarOptions = {}) {
   const me = await Employee.findById(auth.employeeId).lean<IEmployee>();
   if (!me) return { events: [], holidays: [] };
-  const or: Record<string, unknown>[] = [{ reportingManager: me._id }];
-  if (me.department) or.push({ department: me.department });
-  if (me.reportingManager) or.push({ reportingManager: me.reportingManager }, { _id: me.reportingManager });
-  const colleagues = await Employee.find({ $or: or, _id: { $ne: me._id }, employmentStatus: { $ne: 'INACTIVE' } }).select('fullName avatarFile').lean<IEmployee[]>();
+  const query: Record<string, unknown> = { _id: { $ne: me._id }, employmentStatus: { $ne: 'INACTIVE' } };
+  if (opts.scope === 'company') {
+    if (opts.department) query.department = opts.department;
+  } else {
+    const or: Record<string, unknown>[] = [{ reportingManager: me._id }];
+    if (me.department) or.push({ department: me.department });
+    if (me.reportingManager) or.push({ reportingManager: me.reportingManager }, { _id: me.reportingManager });
+    query.$or = or;
+  }
+  const colleagues = await Employee.find(query).select('fullName avatarFile department').populate('department', 'name').lean<(Omit<IEmployee, 'department'> & { department: { name: string } | null })[]>();
   const leaves = await LeaveRequest.find({ employee: { $in: colleagues.map((c) => c._id) }, status: { $in: CONFIRMED_LEAVE_STATUSES }, startDate: { $lte: end }, endDate: { $gte: start } })
     .select('employee startDate endDate dayType').lean<ILeaveRequest[]>();
   const byId = new Map(colleagues.map((c) => [String(c._id), c]));
   const holidays = nonOptional(await employeeHolidays(me, start, end));
   return {
-    events: leaves.map((l) => ({ id: String(l._id), employeeId: String(l.employee), employeeName: byId.get(String(l.employee))?.fullName ?? '', avatarFile: byId.get(String(l.employee))?.avatarFile ?? null, startDate: l.startDate, endDate: l.endDate, halfDay: l.dayType === 'HALF' })),
+    events: leaves.map((l) => ({ id: String(l._id), employeeId: String(l.employee), employeeName: byId.get(String(l.employee))?.fullName ?? '', avatarFile: byId.get(String(l.employee))?.avatarFile ?? null, team: byId.get(String(l.employee))?.department?.name ?? null, startDate: l.startDate, endDate: l.endDate, halfDay: l.dayType === 'HALF' })),
     holidays: holidays.map((h) => ({ id: `${h._id}-${h.date}`, name: h.name, date: h.date, category: h.category, isHalfDay: h.isHalfDay })),
   };
 }

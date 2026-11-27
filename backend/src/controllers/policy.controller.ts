@@ -1,10 +1,12 @@
 import { RequestHandler } from 'express';
-import { PERMISSIONS } from '../constants';
+import { LedgerType, PERMISSIONS } from '../constants';
 import { can } from '../middleware/auth';
 import { ApprovalWorkflow, ILeavePolicy, ILeaveType, LeavePolicy, LeaveType } from '../models/LeaveConfig';
+import { LeaveBalance, LeaveTransaction } from '../models/LeaveLedger';
+import { LeaveRequest } from '../models/LeaveRequest';
 import { audit, ctxOf } from '../services/audit';
 import { companyToday } from '../services/settings';
-import { notFound } from '../utils/errors';
+import { AppError, notFound } from '../utils/errors';
 import { created, ok } from '../utils/http';
 import { withTransaction } from '../utils/transaction';
 
@@ -40,6 +42,36 @@ export const updateType: RequestHandler = async (req, res) => {
     return doc;
   });
   ok(res, updated);
+};
+
+/** Ledger rows the system writes on its own. Anything else means a person used or adjusted this type. */
+const AUTOMATIC_LEDGER: LedgerType[] = ['ENTITLEMENT', 'ACCRUAL', 'CARRY_FORWARD', 'EXPIRY'];
+
+/**
+ * Removes a leave type that was never used, along with its automatic balances and any policy or workflow rules for it.
+ * A type with leave history is refused, because past applications and reports still show its name: it can be made inactive instead.
+ */
+export const deleteType: RequestHandler = async (req, res) => {
+  const ctx = ctxOf(req);
+  await withTransaction(async (session) => {
+    const type = await LeaveType.findById(req.valid.params.id).session(session).lean<ILeaveType>();
+    if (!type) throw notFound('Leave type');
+    // One session runs one operation at a time, so these are sequential.
+    const applications = await LeaveRequest.countDocuments({ leaveType: type._id }).session(session);
+    const entries = await LeaveTransaction.countDocuments({ leaveType: type._id, type: { $nin: AUTOMATIC_LEDGER } }).session(session);
+    if (applications || entries) {
+      const what = applications ? `${applications} leave application${applications === 1 ? '' : 's'}` : `${entries} balance adjustment${entries === 1 ? '' : 's'}`;
+      throw new AppError(409, 'LEAVE_TYPE_IN_USE', `${type.name} cannot be deleted because it has ${what}. Mark it inactive instead, so nobody can apply for it and past records keep its name.`, undefined, { applications, entries });
+    }
+    await LeaveBalance.deleteMany({ leaveType: type._id }, { session });
+    await LeaveTransaction.deleteMany({ leaveType: type._id }, { session });
+    await LeavePolicy.updateMany({ 'rules.leaveType': type._id }, { $pull: { rules: { leaveType: type._id } } }, { session });
+    await ApprovalWorkflow.updateMany({ leaveTypes: type._id }, { $pull: { leaveTypes: type._id } }, { session });
+    await LeaveType.deleteOne({ _id: type._id }, { session });
+    const { _id, ...snapshot } = type;
+    await audit(ctx, { action: 'LEAVE_TYPE_DELETED', entityType: 'LeaveType', entityId: type._id, summary: `${type.code} ${type.name}`, before: snapshot }, session);
+  });
+  ok(res, { deleted: true });
 };
 
 export const listPolicies: RequestHandler = async (_req, res) => {

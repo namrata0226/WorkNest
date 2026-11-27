@@ -18,6 +18,50 @@ type Row = AttendanceDay & { employee: { _id: string; fullName: string; employee
 interface Daily { date: string; today: string; summary: AttendanceSummary & { notPunched: number }; rows: Row[] }
 type Who = Pick<Row['employee'], '_id' | 'fullName'>;
 
+type DailyStatus = 'attended' | 'present' | 'wfh' | 'leave' | 'absent' | 'notPunched';
+const DAILY_STATUS_LABEL: Record<DailyStatus, string> = {
+  attended: 'Total attendance',
+  present: 'Present',
+  wfh: 'Work from home',
+  leave: 'On leave',
+  absent: 'Absent',
+  notPunched: 'Not punched in yet',
+};
+
+/** The people behind one of the day's numbers, with the same team and search as the page. */
+function DailyStatusModal({ status, url, params, onPick, onClose }: { status: DailyStatus; url: string; params: Record<string, string>; onPick: (who: Who) => void; onClose: () => void }) {
+  const list = useInfiniteFetch<Daily>(url, { ...params, status }, { limit: 25, rowsKey: 'rows' });
+  const { data, meta, loading, error } = list;
+  const total = meta?.total ?? data?.rows.length;
+  return (
+    <Modal
+      wide
+      title={`${DAILY_STATUS_LABEL[status]} · ${formatDay(params.date)}${total != null ? ` · ${total} ${total === 1 ? 'person' : 'people'}` : ''}`}
+      onClose={onClose}
+      footer={<Button onClick={onClose}>Close</Button>}
+    >
+      <div className="-m-5">
+        {error && <div className="p-4"><Note>{error}</Note></div>}
+        <DataTable<Row>
+          rows={data?.rows ?? null}
+          loading={loading}
+          rowKey={(r) => r.employee._id}
+          onRowClick={(r) => onPick(r.employee)}
+          empty="Nobody to show."
+          columns={[
+            { header: 'Employee', cell: (r) => <div className="flex items-center gap-2.5"><PersonAvatar person={r.employee} /><div><div className="font-medium">{r.employee.fullName}</div><div className="text-xs text-muted">{r.employee.employeeId} · {r.employee.department ?? 'No team'}</div></div></div> },
+            { header: 'Status', cell: (r) => <AttendanceBadge day={r} /> },
+            { header: 'Punch in', cell: (r) => r.punchIn ?? '—', className: 'tnum' },
+            { header: 'Punch out', cell: (r) => r.punchOut ?? (r.punchIn ? 'Not recorded' : '—'), className: 'tnum' },
+            { header: 'Worked', align: 'right', cell: (r) => formatWorked(r.workedMinutes), className: 'tnum' },
+          ]}
+        />
+        <InfiniteLoader list={list} noun="people" />
+      </div>
+    </Modal>
+  );
+}
+
 function CorrectModal({ who, day, onClose, onDone }: { who: Who; day: Pick<AttendanceDay, 'date' | 'punchIn' | 'punchOut'>; onClose: () => void; onDone: () => void }) {
   const toast = useToast();
   const [formError, setFormError] = useState<string | null>(null);
@@ -130,6 +174,8 @@ function AttendanceBoard({ title, subtitle, dailyUrl, monthBase, manage }: { tit
   const s = data?.summary;
   const isSelf = (id: string) => user?.employee?._id === id;
   const [exporting, setExporting] = useState(false);
+  const [listing, setListing] = useState<DailyStatus | null>(null);
+  const open = (status: DailyStatus) => (s ? () => setListing(status) : undefined);
 
   return (
     <>
@@ -145,12 +191,12 @@ function AttendanceBoard({ title, subtitle, dailyUrl, monthBase, manage }: { tit
         <Input aria-label="Search" placeholder="Search name or ID" value={search} onChange={(e) => { setSearch(e.target.value); }} />
       </div>
       <div className="mb-3 grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
-        <Stat label="Total attendance" value={s?.attended ?? '—'} hint="In office + work from home" tone="brand" />
-        <Stat label="Present" value={s?.present ?? '—'} tone="brand" />
-        <Stat label="Work from home" value={s?.workFromHome ?? '—'} tone="brand" />
-        <Stat label="On leave" value={s?.onLeave ?? '—'} />
-        <Stat label="Absent" value={s?.absent ?? '—'} tone={s?.absent ? 'amber' : undefined} />
-        <Stat label="Not punched in yet" value={s?.notPunched ?? '—'} />
+        <Stat label="Total attendance" value={s?.attended ?? '—'} hint="In office + work from home" tone="brand" onClick={open('attended')} actionLabel="View people" />
+        <Stat label="Present" value={s?.present ?? '—'} tone="brand" onClick={open('present')} actionLabel="View people" />
+        <Stat label="Work from home" value={s?.workFromHome ?? '—'} tone="brand" onClick={open('wfh')} actionLabel="View people" />
+        <Stat label="On leave" value={s?.onLeave ?? '—'} onClick={open('leave')} actionLabel="View people" />
+        <Stat label="Absent" value={s?.absent ?? '—'} tone={s?.absent ? 'amber' : undefined} onClick={open('absent')} actionLabel="View people" />
+        <Stat label="Not punched in yet" value={s?.notPunched ?? '—'} onClick={open('notPunched')} actionLabel="View people" />
       </div>
       {error && <Note>{error}</Note>}
       <Card flush>
@@ -171,6 +217,15 @@ function AttendanceBoard({ title, subtitle, dailyUrl, monthBase, manage }: { tit
         />
         <InfiniteLoader list={list} />
       </Card>
+      {listing && (
+        <DailyStatusModal
+          status={listing}
+          url={dailyUrl}
+          params={{ date, ...(manage && department ? { department } : {}), ...(search ? { search } : {}) }}
+          onPick={(who) => { setListing(null); setViewing(who); }}
+          onClose={() => setListing(null)}
+        />
+      )}
       {viewing && <EmployeePeriodModal who={viewing} base={monthBase} initial={monthPeriod(date.slice(0, 7))} canCorrect={manage && !isSelf(viewing._id)} onClose={() => setViewing(null)} onChanged={() => void reload()} />}
       {exporting && <ExportModal initial={monthPeriod(date.slice(0, 7))} department={department} departmentName={departments.data?.find((d) => d._id === department)?.name} onClose={() => setExporting(false)} />}
       {correcting && <CorrectModal who={correcting.employee} day={correcting} onClose={() => setCorrecting(null)} onDone={() => { setCorrecting(null); void reload(); }} />}

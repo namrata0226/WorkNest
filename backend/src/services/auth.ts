@@ -7,11 +7,12 @@ import { logger } from '../config/logger';
 import { permissionsFor } from '../constants';
 import { JWT_ISSUER } from '../middleware/auth';
 import { Employee } from '../models/Employee';
-import { PasswordResetToken, Session } from '../models/Session';
+import { ILoginChallenge, LoginChallenge, PasswordResetToken, Session } from '../models/Session';
 import { IUser, User } from '../models/User';
 import { AppError, unauthorized, unprocessable } from '../utils/errors';
 import { audit, RequestContext } from './audit';
 import { sendEmail } from './email';
+import { hashOtp, maskEmail, newOtp, otpDelivery, otpMatches } from './otp';
 import { getSettings } from './settings';
 
 const ARGON_OPTIONS = { type: argon2.argon2id as 2, memoryCost: env.isTest ? 2 ** 12 : 2 ** 16, timeCost: env.isTest ? 2 : 3, parallelism: 1 };
@@ -49,9 +50,39 @@ export interface IssuedTokens {
   refreshToken: string;
 }
 
-const INVALID_LOGIN = 'Invalid email or password, or the account is temporarily locked';
+const INVALID_LOGIN = 'Invalid email or password';
+const CHALLENGE_EXPIRED = 'Your sign-in has expired. Enter your email and password again.';
 
-export async function login(ctx: RequestContext, email: string, password: string, userAgent?: string): Promise<IssuedTokens & { user: IUser }> {
+/** How long the person has, after the password, to get and enter a code. */
+const CHALLENGE_TTL_MS = 10 * 60_000;
+export const OTP_TTL_MINUTES = 5;
+export const OTP_RESEND_SECONDS = 30;
+const MAX_OTP_SENDS = 5;
+export const MAX_OTP_ATTEMPTS = 5;
+
+function lockedError(lockUntil: Date): AppError {
+  const seconds = Math.max(1, Math.ceil((lockUntil.getTime() - Date.now()) / 1000));
+  const minutes = Math.ceil(seconds / 60);
+  return new AppError(423, 'ACCOUNT_LOCKED', `Too many failed attempts. Try again in ${minutes} minute${minutes === 1 ? '' : 's'}.`, undefined, {
+    lockedUntil: lockUntil.toISOString(),
+    retryAfterSeconds: seconds,
+  });
+}
+
+const challengeExpired = () => unauthorized(CHALLENGE_EXPIRED, 'LOGIN_CHALLENGE_EXPIRED');
+
+export interface LoginChallengeResult {
+  challengeToken: string;
+  expiresAt: string;
+  /** Where the code will go: the account's email, partly hidden. */
+  destination: string;
+}
+
+/**
+ * Step one of signing in. A correct password does not sign anyone in: it opens a short-lived
+ * challenge that a one-time code, sent to the account's email, must complete.
+ */
+export async function login(ctx: RequestContext, email: string, password: string, userAgent?: string): Promise<LoginChallengeResult> {
   const user = await User.findOne({ email: email.toLowerCase() }).select('+passwordHash').lean<IUser>();
   if (!user) {
     await argon2.verify(await getDummyHash(), password);
@@ -60,24 +91,104 @@ export async function login(ctx: RequestContext, email: string, password: string
 
   const settings = await getSettings();
   const valid = await argon2.verify(user.passwordHash, password);
-  const locked = user.lockUntil && user.lockUntil > new Date();
 
-  if (locked || !valid || !user.isActive) {
-    if (!locked && !valid) {
-      const updated = await User.findByIdAndUpdate(user._id, { $inc: { failedLoginAttempts: 1 } }, { returnDocument: 'after' }).lean<IUser>();
-      if ((updated?.failedLoginAttempts ?? 0) >= settings.security.maxFailedLogins) {
-        await User.updateOne({ _id: user._id }, {
-          lockUntil: new Date(Date.now() + settings.security.lockoutMinutes * 60_000),
-          failedLoginAttempts: 0,
-        });
-        await audit(ctx, { action: 'ACCOUNT_LOCKED', category: 'SECURITY', entityType: 'User', entityId: user._id, actorEmail: user.email, summary: 'Locked after repeated failed logins' });
-      }
-    }
+  if (!user.isActive) {
+    await audit(ctx, { action: 'LOGIN_FAILED', category: 'SECURITY', entityType: 'User', entityId: user._id, actorEmail: user.email, summary: 'Inactive account' });
+    throw unauthorized(INVALID_LOGIN, 'INVALID_CREDENTIALS');
+  }
+  // While locked, even the right password is refused, and the attempt does not extend the lock.
+  if (user.lockUntil && user.lockUntil > new Date()) {
+    await audit(ctx, { action: 'LOGIN_FAILED', category: 'SECURITY', entityType: 'User', entityId: user._id, actorEmail: user.email, summary: 'Account locked' });
+    throw lockedError(user.lockUntil);
+  }
+
+  if (!valid) {
+    const updated = await User.findByIdAndUpdate(user._id, { $inc: { failedLoginAttempts: 1 } }, { returnDocument: 'after' }).lean<IUser>();
     await audit(ctx, { action: 'LOGIN_FAILED', category: 'SECURITY', entityType: 'User', entityId: user._id, actorEmail: user.email });
+    const failures = updated?.failedLoginAttempts ?? 0;
+    if (failures >= settings.security.maxFailedLogins) {
+      const lockUntil = new Date(Date.now() + settings.security.lockoutMinutes * 60_000);
+      await User.updateOne({ _id: user._id }, { lockUntil, failedLoginAttempts: 0 });
+      await LoginChallenge.updateMany({ user: user._id, consumedAt: null }, { consumedAt: new Date() });
+      await audit(ctx, { action: 'ACCOUNT_LOCKED', category: 'SECURITY', entityType: 'User', entityId: user._id, actorEmail: user.email, summary: 'Locked after repeated failed logins' });
+      throw lockedError(lockUntil);
+    }
+    // Same answer as an unknown email, so the response does not reveal which accounts exist.
     throw unauthorized(INVALID_LOGIN, 'INVALID_CREDENTIALS');
   }
 
-  await User.updateOne({ _id: user._id }, { failedLoginAttempts: 0, lockUntil: null, lastLoginAt: new Date() });
+  await User.updateOne({ _id: user._id }, { failedLoginAttempts: 0, lockUntil: null });
+  const challengeToken = newToken();
+  const expiresAt = new Date(Date.now() + CHALLENGE_TTL_MS);
+  await LoginChallenge.create({
+    user: user._id,
+    tokenHash: hashToken(challengeToken),
+    expiresAt,
+    userAgent: userAgent?.slice(0, 300) ?? null,
+    ip: ctx.ip ?? null,
+  });
+  await audit(ctx, { action: 'LOGIN_PASSWORD_OK', category: 'SECURITY', entityType: 'User', entityId: user._id, actorEmail: user.email, summary: 'Password accepted; waiting for one-time code' });
+
+  return { challengeToken, expiresAt: expiresAt.toISOString(), destination: maskEmail(user.email) };
+}
+
+async function openChallenge(challengeToken: string) {
+  const challenge = await LoginChallenge.findOne({ tokenHash: hashToken(challengeToken), consumedAt: null, expiresAt: { $gt: new Date() } }).lean<ILoginChallenge>();
+  if (!challenge) throw challengeExpired();
+  const user = await User.findById(challenge.user).lean<IUser>();
+  if (!user?.isActive) throw challengeExpired();
+  if (user.lockUntil && user.lockUntil > new Date()) throw lockedError(user.lockUntil);
+  return { challenge, user };
+}
+
+export interface OtpSent {
+  destination: string;
+  resendAt: string;
+  codeExpiresAt: string;
+}
+
+/** Step two: email a code. A new code replaces the last one, and resending waits 30 seconds. */
+export async function sendLoginOtp(ctx: RequestContext, challengeToken: string): Promise<OtpSent> {
+  const { challenge, user } = await openChallenge(challengeToken);
+
+  const destination = maskEmail(user.email);
+
+  if (challenge.sendCount >= MAX_OTP_SENDS) {
+    await LoginChallenge.updateOne({ _id: challenge._id }, { consumedAt: new Date() });
+    throw new AppError(429, 'OTP_SEND_LIMIT', 'Too many codes requested. Enter your email and password again.');
+  }
+
+  const now = new Date();
+  const code = newOtp();
+  const codeExpiresAt = new Date(now.getTime() + OTP_TTL_MINUTES * 60_000);
+  // Claimed atomically, so two quick clicks cannot both send.
+  const claimed = await LoginChallenge.findOneAndUpdate(
+    {
+      _id: challenge._id,
+      consumedAt: null,
+      sendCount: { $lt: MAX_OTP_SENDS },
+      $or: [{ lastSentAt: null }, { lastSentAt: { $lte: new Date(now.getTime() - OTP_RESEND_SECONDS * 1000) } }],
+    },
+    { $set: { channel: 'EMAIL', codeHash: hashOtp(challenge._id, code), codeExpiresAt, lastSentAt: now }, $inc: { sendCount: 1 } },
+    { returnDocument: 'after' },
+  ).lean<ILoginChallenge>();
+  if (!claimed) {
+    const latest = await LoginChallenge.findById(challenge._id).select('lastSentAt').lean<ILoginChallenge>();
+    const resendAt = new Date((latest?.lastSentAt ?? now).getTime() + OTP_RESEND_SECONDS * 1000);
+    const wait = Math.max(1, Math.ceil((resendAt.getTime() - Date.now()) / 1000));
+    throw new AppError(429, 'OTP_RESEND_WAIT', `Wait ${wait} seconds before asking for another code.`, undefined, { resendAt: resendAt.toISOString() });
+  }
+
+  if (!(await otpDelivery.deliver(user.email, code, OTP_TTL_MINUTES))) {
+    // Nothing reached the person, so they may try again straight away.
+    await LoginChallenge.updateOne({ _id: challenge._id }, { codeHash: null, codeExpiresAt: null, lastSentAt: null });
+    throw new AppError(503, 'OTP_DELIVERY_FAILED', 'We could not send the email. Please try again in a moment.');
+  }
+  await audit(ctx, { action: 'LOGIN_OTP_SENT', category: 'SECURITY', entityType: 'User', entityId: user._id, actorEmail: user.email, summary: 'Code sent by email' });
+  return { destination, resendAt: new Date(now.getTime() + OTP_RESEND_SECONDS * 1000).toISOString(), codeExpiresAt: codeExpiresAt.toISOString() };
+}
+
+async function startSession(ctx: RequestContext, user: IUser, userAgent?: string | null): Promise<IssuedTokens> {
   const refreshToken = newToken();
   const session = await Session.create({
     user: user._id,
@@ -86,8 +197,50 @@ export async function login(ctx: RequestContext, email: string, password: string
     userAgent: userAgent?.slice(0, 300) ?? null,
     ip: ctx.ip ?? null,
   });
-  await audit(ctx, { action: 'LOGIN_SUCCESS', category: 'SECURITY', entityType: 'User', entityId: user._id, actorEmail: user.email });
-  return { accessToken: signAccessToken(user._id, session._id), refreshToken, user };
+  return { accessToken: signAccessToken(user._id, session._id), refreshToken };
+}
+
+/** Step three: the right code, in time, completes the sign-in. Five wrong codes end the challenge. */
+export async function verifyLoginOtp(ctx: RequestContext, challengeToken: string, code: string, userAgent?: string): Promise<IssuedTokens & { user: IUser }> {
+  const now = new Date();
+  const tokenHash = hashToken(challengeToken);
+  // Counting the attempt before checking it means parallel guesses cannot exceed the limit.
+  const challenge = await LoginChallenge.findOneAndUpdate(
+    { tokenHash, consumedAt: null, expiresAt: { $gt: now }, codeHash: { $ne: null }, attempts: { $lt: MAX_OTP_ATTEMPTS } },
+    { $inc: { attempts: 1 } },
+    { returnDocument: 'after' },
+  ).lean<ILoginChallenge>();
+  if (!challenge) {
+    const waiting = await LoginChallenge.exists({ tokenHash, consumedAt: null, expiresAt: { $gt: now }, codeHash: null });
+    if (waiting) throw unprocessable('Ask for a code first.', 'OTP_NOT_SENT');
+    throw challengeExpired();
+  }
+
+  const user = await User.findById(challenge.user).lean<IUser>();
+  if (!user?.isActive) throw challengeExpired();
+  if (user.lockUntil && user.lockUntil > now) throw lockedError(user.lockUntil);
+
+  if (!otpMatches(challenge._id, code, challenge.codeHash!)) {
+    const left = MAX_OTP_ATTEMPTS - challenge.attempts;
+    await audit(ctx, { action: 'LOGIN_OTP_FAILED', category: 'SECURITY', entityType: 'User', entityId: user._id, actorEmail: user.email });
+    if (left <= 0) {
+      await LoginChallenge.updateOne({ _id: challenge._id }, { consumedAt: now });
+      throw unauthorized('Too many wrong codes. Enter your email and password again.', 'LOGIN_CHALLENGE_EXPIRED');
+    }
+    throw new AppError(401, 'INVALID_OTP', `That code is not right. ${left} attempt${left === 1 ? '' : 's'} left.`, undefined, { attemptsLeft: left });
+  }
+  if (!challenge.codeExpiresAt || challenge.codeExpiresAt <= now) {
+    throw new AppError(401, 'OTP_CODE_EXPIRED', 'This code has expired. Ask for a new one.');
+  }
+
+  // A code works once, even if it is submitted twice at the same moment.
+  const won = await LoginChallenge.findOneAndUpdate({ _id: challenge._id, consumedAt: null }, { consumedAt: now }).lean();
+  if (!won) throw challengeExpired();
+
+  await User.updateOne({ _id: user._id }, { failedLoginAttempts: 0, lockUntil: null, lastLoginAt: now });
+  const tokens = await startSession(ctx, user, userAgent ?? challenge.userAgent);
+  await audit(ctx, { action: 'LOGIN_SUCCESS', category: 'SECURITY', entityType: 'User', entityId: user._id, actorEmail: user.email, summary: 'Verified by email code' });
+  return { ...tokens, user };
 }
 
 /** Rotates the refresh token. A replay of an already-used token revokes the session. */

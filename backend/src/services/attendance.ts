@@ -189,7 +189,18 @@ export async function punchOut(ctx: RequestContext) {
   return todayAttendance(employeeId);
 }
 
-export interface DailyFilters { date: string; department?: string; search?: string; manager?: Types.ObjectId }
+export type DailyStatus = 'attended' | 'present' | 'wfh' | 'leave' | 'absent' | 'notPunched';
+export interface DailyFilters { date: string; department?: string; search?: string; manager?: Types.ObjectId; status?: DailyStatus }
+
+/** The people behind each number in the daily summary, by the same rules that count them. */
+const DAILY_STATUS_MATCH: Record<DailyStatus, (d: { status: AttendanceStatus; date: string }, today: string) => boolean> = {
+  attended: (d, today) => d.status === 'PRESENT' || (d.status === 'WFH' && d.date <= today),
+  present: (d) => d.status === 'PRESENT',
+  wfh: (d, today) => d.status === 'WFH' && d.date <= today,
+  leave: (d) => d.status === 'ON_LEAVE' || d.status === 'HALF_LEAVE',
+  absent: (d) => d.status === 'ABSENT',
+  notPunched: (d) => d.status === 'UPCOMING',
+};
 
 export async function dailyAttendance(f: DailyFilters) {
   const query: Record<string, unknown> = { employmentStatus: { $ne: 'INACTIVE' }, joiningDate: { $lte: f.date } };
@@ -211,7 +222,9 @@ export async function dailyAttendance(f: DailyFilters) {
       ...buildDay(e, f.date, today, settings.attendanceStartDate, sources.get(String(e._id))!, holiday),
     };
   });
-  return { date: f.date, today, summary: { ...summarize(rows, today), notPunched: rows.filter((r) => r.status === 'UPCOMING').length }, rows };
+  const summary = { ...summarize(rows, today), notPunched: rows.filter((r) => r.status === 'UPCOMING').length };
+  // The summary always covers everyone; a status narrows only the list.
+  return { date: f.date, today, summary, rows: f.status ? rows.filter((r) => DAILY_STATUS_MATCH[f.status!](r, today)) : rows };
 }
 
 /** The checks shared by HR's corrections and employees' requests, so both follow the same rules. */

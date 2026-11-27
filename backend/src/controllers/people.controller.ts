@@ -68,7 +68,7 @@ export const exportAttendance: RequestHandler = async (req, res) => {
 export const teamDaily: RequestHandler = async (req, res) => {
   const q = req.valid.query;
   const date = q.date ?? todayIn((await getSettings()).timezone);
-  const result = await attendance.dailyAttendance({ date, search: q.search, manager: req.auth!.employeeId! });
+  const result = await attendance.dailyAttendance({ date, search: q.search, status: q.status, manager: req.auth!.employeeId! });
   const { skip, limit } = pageOptions(q, [], 'date');
   ok(res, { ...result, rows: result.rows.slice(skip, skip + limit) }, pageMeta(q, result.rows.length));
 };
@@ -78,7 +78,10 @@ export const teamMonth: RequestHandler = async (req, res) => {
 
 /* Insights and team calendar */
 export const insights: RequestHandler = async (_req, res) => ok(res, await hrInsights());
-export const calendar: RequestHandler = async (req, res) => ok(res, await teamCalendar(req.auth!, req.valid.query.start, req.valid.query.end));
+export const calendar: RequestHandler = async (req, res) => {
+  const { start, end, scope, department } = req.valid.query;
+  ok(res, await teamCalendar(req.auth!, start, end, { scope, department }));
+};
 
 /* Decisions from email. Public, because the token is the proof, and rate limited. */
 export const emailPreview: RequestHandler = async (req, res) => ok(res, await emailAction.previewEmailAction(req.valid.body.token));

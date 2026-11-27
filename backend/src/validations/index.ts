@@ -16,6 +16,9 @@ const year = z.coerce.number().int().min(2000).max(2100);
 
 /* Authentication */
 export const loginBody = z.strictObject({ email, password: z.string().min(1).max(200) });
+const challengeToken = z.string().min(20).max(200);
+export const otpSendBody = z.strictObject({ challengeToken });
+export const otpVerifyBody = z.strictObject({ challengeToken, code: z.string().trim().regex(/^\d{6}$/, 'Enter the 6-digit code') });
 export const forgotBody = z.strictObject({ email });
 export const resetBody = z.strictObject({ token: z.string().min(20).max(200), password: z.string().min(8).max(200) });
 export const changePasswordBody = z.strictObject({ currentPassword: z.string().min(1).max(200), newPassword: z.string().min(8).max(200) });
@@ -63,7 +66,8 @@ const checkPeriod = <T extends PeriodFields>(schema: z.ZodType<T>) => schema
   .refine((q) => !q.from || !q.to || diffDays(q.to, q.from) < MAX_ATTENDANCE_DAYS, { message: `Choose a period of at most ${MAX_ATTENDANCE_DAYS} days`, path: ['to'] });
 /** A month (YYYY-MM) or a from/to date range. With neither, the current month. */
 export const attendanceMonthQuery = checkPeriod(z.object(periodFields));
-export const attendanceDailyQuery = z.object({ ...paginationQuery, date: dateOnly.optional(), department: objectId.optional(), search: z.string().trim().max(100).optional() });
+const dailyStatus = z.enum(['attended', 'present', 'wfh', 'leave', 'absent', 'notPunched']).optional();
+export const attendanceDailyQuery = z.object({ ...paginationQuery, status: dailyStatus, date: dateOnly.optional(), department: objectId.optional(), search: z.string().trim().max(100).optional() });
 export const attendanceCorrectionBody = z.strictObject({ punchIn: clockTime, punchOut: clockTime.nullable().optional(), note: text(500) });
 export const emptyBody = z.strictObject({});
 export const wfhApplyBody = z.strictObject({ startDate: dateOnly, endDate: dateOnly, reason: text(1000) });
@@ -73,8 +77,9 @@ const moneyAmount = z.number().positive('Enter an amount above zero').max(10_000
 export const correctionRequestBody = z.strictObject({ date: dateOnly, punchIn: clockTime, punchOut: clockTime.nullable().optional(), reason: text(500) });
 export const attendanceExportQuery = checkPeriod(z.object({ ...periodFields, department: objectId.optional(), format: z.enum(['csv', 'xlsx']).default('xlsx') }))
   .refine((q) => Boolean(q.month || q.from), { message: 'Choose a month or a date range', path: ['month'] });
-export const teamDailyQuery = z.object({ ...paginationQuery, date: dateOnly.optional(), search: z.string().trim().max(100).optional() });
+export const teamDailyQuery = z.object({ ...paginationQuery, status: dailyStatus, date: dateOnly.optional(), search: z.string().trim().max(100).optional() });
 export const dateRangeQuery = z.object({ start: dateOnly, end: dateOnly });
+export const teamCalendarQuery = dateRangeQuery.extend({ scope: z.enum(['team', 'company']).optional(), department: objectId.optional() });
 export const emailPreviewBody = z.strictObject({ token: z.string().min(20).max(200) });
 export const emailDecideBody = z.strictObject({ token: z.string().min(20).max(200), decision: z.enum(['approve', 'reject']), reason: z.string().trim().max(1000).optional() });
 const emergencyContact = z.strictObject({ name: text(120), relationship: text(60), phone: z.string().trim().regex(/^[+\d][\d\s()-]{5,20}$/, 'Must be a valid phone number') });

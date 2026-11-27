@@ -1,12 +1,14 @@
+import { createHash } from 'crypto';
 import mongoose, { Types } from 'mongoose';
 import supertest from 'supertest';
-import { afterAll, beforeAll, beforeEach, inject } from 'vitest';
+import { afterAll, beforeAll, beforeEach, inject, vi } from 'vitest';
 import { createApp } from '../src/app';
 import { HR_ASSIGNABLE_PERMISSIONS, Role, ROLES } from '../src/constants';
 import '../src/models';
-import { Department, Employee, IEmployee, LeaveType, Location, User } from '../src/models';
+import { Department, Employee, IEmployee, LeaveType, Location, LoginChallenge, User } from '../src/models';
 import { hashPassword } from '../src/services/auth';
 import { ensureBaseline } from '../src/services/baseline';
+import { otpDelivery } from '../src/services/otp';
 
 export const PASSWORD = 'Sup3r-Secret-Pass';
 export const app = createApp();
@@ -75,9 +77,34 @@ export type Agent = ReturnType<typeof agentFor> extends Promise<infer A> ? A : n
 /** A logged-in client holding real cookies, sending the CSRF header on every call. */
 export async function agentFor(email: string, password = PASSWORD, target = app) {
   const agent = supertest.agent(target).set('X-Requested-With', 'WorkNest');
-  const res = await agent.post('/api/auth/login').send({ email, password });
+  const res = await completeLogin(agent, email, password);
   if (res.status !== 200) throw new Error(`Login failed for ${email}: ${res.status} ${JSON.stringify(res.body)}`);
   return agent;
+}
+
+/** Codes "sent" during tests, by recipient, so parallel sign-ins do not mix them up. */
+const issuedCodes = new Map<string, string>();
+
+/** Sends a sign-in code, capturing it instead of emailing it. Returns the code and the send response. */
+export async function sendCode(agent: supertest.Agent, challengeToken: string) {
+  // Re-applied each time, since some tests restore every mock.
+  vi.spyOn(otpDelivery, 'deliver').mockImplementation(async (to, issued) => {
+    issuedCodes.set(to, issued);
+    return true;
+  });
+  const res = await agent.post('/api/auth/otp/send').send({ challengeToken });
+  const challenge = await LoginChallenge.findOne({ tokenHash: createHash('sha256').update(challengeToken).digest('hex') }).lean();
+  const user = challenge ? await User.findById(challenge.user).lean() : null;
+  return { code: (user && issuedCodes.get(user.email)) || '', res };
+}
+
+/** Password, then an emailed code, then verification: the whole sign-in. Returns the last response. */
+export async function completeLogin(agent: supertest.Agent, email: string, password = PASSWORD) {
+  const step = await agent.post('/api/auth/login').send({ email, password });
+  if (step.status !== 200) return step;
+  const { code, res } = await sendCode(agent, step.body.data.challengeToken);
+  if (res.status !== 200) return res;
+  return agent.post('/api/auth/otp/verify').send({ challengeToken: step.body.data.challengeToken, code });
 }
 
 export async function baseline() {

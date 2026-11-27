@@ -160,6 +160,22 @@ describe('team attendance', () => {
     expect(res.body.data.rows[0].status).toBe('PRESENT');
   });
 
+  it('lists only the people behind a card, while the totals still cover everyone', async () => {
+    await empAgent.post('/api/attendance/punch-in').send({});
+    const names = async (status: string) => {
+      const res = await hrAgent.get('/api/attendance').query({ date: MON, status });
+      expect(res.status).toBe(200);
+      return { names: res.body.data.rows.map((r: { employee: { fullName: string } }) => r.employee.fullName), summary: res.body.data.summary };
+    };
+    const present = await names('present');
+    expect(present.names).toEqual(['Emma Employee']);
+    expect(present.summary.notPunched).toBeGreaterThan(0);
+    expect((await names('notPunched')).names).not.toContain('Emma Employee');
+    expect((await names('absent')).names).toEqual([]);
+    expect((await hrAgent.get('/api/attendance').query({ date: MON, status: 'bogus' })).status).toBe(400);
+    expect((await managerAgent.get('/api/attendance/team').query({ date: MON, status: 'present' })).body.data.rows).toHaveLength(1);
+  });
+
   it('opens a report\'s month, but not anyone else\'s', async () => {
     expect((await managerAgent.get(`/api/attendance/team/${emp.employee._id}`).query({ month: '2030-03' })).status).toBe(200);
     expect((await managerAgent.get(`/api/attendance/team/${other.employee._id}`)).status).toBe(404);
@@ -356,6 +372,27 @@ describe('team calendar', () => {
     expect(res.body.data.events.map((e: { employeeName: string }) => e.employeeName)).toEqual(['Bala']);
     const text = JSON.stringify(res.body.data.events);
     expect(text).not.toMatch(/Very private|Menstrual|MNL|leaveType|reason/);
+  });
+
+  it('shows the whole company to anyone, filtered by team if asked, still without private details', async () => {
+    const sales = await makeDepartment('Sales');
+    const ops = await makeDepartment('Ops');
+    const a = await makePerson({ department: sales, name: 'Asha' });
+    const z = await makePerson({ department: ops, name: 'Zed' });
+    const zAgent = await agentFor(z.email);
+    const leave = await zAgent.post('/api/leaves').send({ ...fullDay(await typeId('CL'), MON), reason: 'Very private' });
+    expect(leave.status).toBe(201);
+    expect((await hrAgent.patch(`/api/approvals/${leave.body.data._id}/approve`).send({})).status).toBe(200);
+    const aAgent = await agentFor(a.email);
+    const range = { start: '2030-03-01', end: '2030-03-31' };
+
+    expect((await aAgent.get('/api/calendar/team').query(range)).body.data.events).toEqual([]);
+    const company = await aAgent.get('/api/calendar/team').query({ ...range, scope: 'company' });
+    expect(company.status).toBe(200);
+    expect(company.body.data.events.map((e: { employeeName: string; team: string }) => [e.employeeName, e.team])).toEqual([['Zed', 'Ops']]);
+    expect(JSON.stringify(company.body.data.events)).not.toMatch(/Very private|leaveType|reason|CL/);
+    expect((await aAgent.get('/api/calendar/team').query({ ...range, scope: 'company', department: String(sales) })).body.data.events).toEqual([]);
+    expect((await aAgent.get('/api/calendar/team').query({ ...range, scope: 'everything' })).status).toBe(400);
   });
 
   it('leaves out pending leave and needs dates', async () => {

@@ -28,9 +28,19 @@ function clearCookies(res: Response) {
   res.clearCookie(REFRESH_COOKIE, refreshCookie);
 }
 
+/** A correct password opens a challenge; no cookie is set until a one-time code completes it. */
 export const login: RequestHandler = async (req, res) => {
   const { email, password } = req.valid.body;
-  const result = await auth.login(ctxOf(req), email, password, req.get('user-agent'));
+  ok(res, await auth.login(ctxOf(req), email, password, req.get('user-agent')));
+};
+
+export const sendOtp: RequestHandler = async (req, res) => {
+  ok(res, await auth.sendLoginOtp(ctxOf(req), req.valid.body.challengeToken));
+};
+
+export const verifyOtp: RequestHandler = async (req, res) => {
+  const { challengeToken, code } = req.valid.body;
+  const result = await auth.verifyLoginOtp(ctxOf(req), challengeToken, code, req.get('user-agent'));
   setCookies(res, result);
   ok(res, await auth.currentUserProfile(result.user._id));
 };

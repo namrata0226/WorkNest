@@ -237,6 +237,17 @@ function WfhCard({ onChange }: { onChange: () => void }) {
   );
 }
 
+type DayFilter = 'attended' | 'present' | 'wfh' | 'leave' | 'absent';
+
+/** What each summary card counts, matching the totals the server sends, so the list always agrees with the number. */
+const DAY_FILTERS: Record<DayFilter, { label: string; match: (d: AttendanceDay, today: string) => boolean }> = {
+  attended: { label: 'Attended', match: (d, today) => d.status === 'PRESENT' || (d.status === 'WFH' && d.date <= today) },
+  present: { label: 'Present', match: (d) => d.status === 'PRESENT' },
+  wfh: { label: 'Work from home', match: (d, today) => d.status === 'WFH' && d.date <= today },
+  leave: { label: 'On leave', match: (d) => d.status === 'ON_LEAVE' || d.status === 'HALF_LEAVE' },
+  absent: { label: 'Absent', match: (d) => d.status === 'ABSENT' },
+};
+
 export function AttendancePage() {
   const [period, setPeriod] = useState<Period>(() => defaultPeriod());
   const params = periodParams(period);
@@ -245,6 +256,9 @@ export function AttendancePage() {
   const [fixing, setFixing] = useState<AttendanceDay | null>(null);
   const [corrections, setCorrections] = useState(0);
   const s = data?.summary;
+  const [filter, setFilter] = useState<DayFilter | null>(null);
+  const show = (f: DayFilter) => setFilter(f);
+  const popupDays = data && filter ? data.days.filter((d) => DAY_FILTERS[filter].match(d, data.today)) : [];
   // Punches can be wrong on any past or current working day, so any of them can be raised.
   const canFix = (d: AttendanceDay) => Boolean(data) && d.date <= data!.today && !['NOT_EMPLOYED', 'ON_LEAVE', 'HOLIDAY'].includes(d.status) && (d.status !== 'WEEKEND' || Boolean(d.punchIn));
   return (
@@ -258,12 +272,14 @@ export function AttendancePage() {
             value={s ? days(s.attended) : '—'}
             hint={s ? `${s.present} in office + ${s.workFromHome} from home${attendanceRate(s) != null ? ` · ${attendanceRate(s)}% of working days` : ''}` : hint}
             tone="brand"
+            onClick={s ? () => show('attended') : undefined}
+            actionLabel="View days"
           />
         </div>
-        <Stat label="Present" value={s?.present ?? '—'} hint={hint} tone="brand" />
-        <Stat label="Work from home" value={s?.workFromHome ?? '—'} hint={hint} tone="brand" />
-        <Stat label="On leave" value={s?.onLeave ?? '—'} hint={hint} />
-        <Stat label="Absent" value={s?.absent ?? '—'} hint={hint} tone={s?.absent ? 'amber' : undefined} />
+        <Stat label="Present" value={s?.present ?? '—'} hint={hint} tone="brand" onClick={s ? () => show('present') : undefined} actionLabel="View days" />
+        <Stat label="Work from home" value={s?.workFromHome ?? '—'} hint={hint} tone="brand" onClick={s ? () => show('wfh') : undefined} actionLabel="View days" />
+        <Stat label="On leave" value={s?.onLeave ?? '—'} hint={hint} onClick={s ? () => show('leave') : undefined} actionLabel="View days" />
+        <Stat label="Absent" value={s?.absent ?? '—'} hint={hint} tone={s?.absent ? 'amber' : undefined} onClick={s ? () => show('absent') : undefined} actionLabel="View days" />
       </div>
       <WfhCard onChange={() => void reload()} />
       <CorrectionsCard reloadKey={corrections} />
@@ -276,6 +292,18 @@ export function AttendancePage() {
         {error && <Note>{error}</Note>}
         <AttendanceTable days={data?.days ?? null} loading={loading} actions={(d) => (canFix(d) ? <Button small onClick={() => setFixing(d)}>Fix</Button> : null)} />
       </Card>
+      {filter && (
+        <Modal
+          wide
+          title={`${DAY_FILTERS[filter].label} · ${popupDays.length} ${popupDays.length === 1 ? 'day' : 'days'} in ${periodLabel(period)}`}
+          onClose={() => setFilter(null)}
+          footer={<Button onClick={() => setFilter(null)}>Close</Button>}
+        >
+          <div className="-m-5">
+            <AttendanceTable days={popupDays} />
+          </div>
+        </Modal>
+      )}
       {fixing && <RequestCorrectionModal date={fixing.date} punchIn={fixing.punchIn} punchOut={fixing.punchOut} onClose={() => setFixing(null)} onDone={() => { setFixing(null); setCorrections((n) => n + 1); }} />}
     </>
   );

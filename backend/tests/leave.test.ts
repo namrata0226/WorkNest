@@ -577,6 +577,45 @@ describe('leave policies', () => {
     expect(res.body.data.code).toBe('STUD');
     expect((await apply(fullDay(res.body.data._id, FRI))).status).toBe(201);
   });
+
+  describe('deleting a leave type', () => {
+    const study = async () => (await hrAgent.post('/api/leave-types').send({ name: 'Study Leave', code: 'STUD', annualEntitlement: 3 })).body.data._id as string;
+
+    it('removes an unused type with its automatic balances and the rules that name it', async () => {
+      const id = await study();
+      await empAgent.get('/api/leave-balances/my');
+      expect(await LeaveBalance.exists({ leaveType: id })).toBeTruthy();
+      await hrAgent.post('/api/leave-policies').send({ name: 'Study rules', effectiveFrom: '2020-01-01', rules: [{ leaveType: id, maxDuration: 2 }, { leaveType: cl, maxDuration: 3 }] });
+      await ApprovalWorkflow.create({ name: 'Study approval', steps: [{ order: 1, approverType: 'HR_ADMIN' }], leaveTypes: [id] });
+
+      const res = await hrAgent.delete(`/api/leave-types/${id}`);
+      expect(res.status).toBe(200);
+      expect(await LeaveType.exists({ _id: id })).toBeNull();
+      expect(await LeaveBalance.exists({ leaveType: id })).toBeNull();
+      expect(await LeaveTransaction.exists({ leaveType: id })).toBeNull();
+      const policy = (await hrAgent.get('/api/leave-policies')).body.data.find((p: any) => p.name === 'Study rules');
+      expect(policy.rules.map((r: any) => String(r.leaveType._id ?? r.leaveType))).toEqual([cl]);
+      expect((await ApprovalWorkflow.findOne({ name: 'Study approval' }).lean())!.leaveTypes).toEqual([]);
+      expect(await AuditLog.exists({ action: 'LEAVE_TYPE_DELETED' })).toBeTruthy();
+      expect((await empAgent.get('/api/leave-balances/my')).status).toBe(200);
+    });
+
+    it('refuses a type someone has applied for, and suggests making it inactive', async () => {
+      const id = await study();
+      expect((await apply(fullDay(id, FRI))).status).toBe(201);
+      const res = await hrAgent.delete(`/api/leave-types/${id}`);
+      expect(res.status).toBe(409);
+      expect(res.body.error.code).toBe('LEAVE_TYPE_IN_USE');
+      expect(res.body.error.message).toMatch(/1 leave application.*inactive/);
+      expect(await LeaveType.exists({ _id: id })).toBeTruthy();
+    });
+
+    it('is only for people who manage leave policy', async () => {
+      const id = await study();
+      expect((await empAgent.delete(`/api/leave-types/${id}`)).status).toBe(403);
+      expect((await hrAgent.delete('/api/leave-types/000000000000000000000000')).status).toBe(404);
+    });
+  });
 });
 
 describe('dashboard', () => {

@@ -3,9 +3,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { env } from '../src/config/env';
 import { createApp } from '../src/app';
 import { REFRESH_COOKIE } from '../src/middleware/auth';
-import { AuditLog, PasswordResetToken, Session, User } from '../src/models';
+import { AuditLog, Employee, LoginChallenge, PasswordResetToken, Session, User } from '../src/models';
 import * as email from '../src/services/email';
-import { agentFor, app, makePerson, PASSWORD, useDatabase } from './helpers';
+import { agentFor, app, completeLogin, makePerson, PASSWORD, sendCode, useDatabase } from './helpers';
 
 useDatabase('auth');
 const client = () => supertest.agent(app).set('X-Requested-With', 'WorkNest');
@@ -15,9 +15,15 @@ const cookieValue = (res: supertest.Response, name: string) => {
 };
 
 describe('login', () => {
-  it('sets HttpOnly SameSite cookies and never returns tokens in the body', async () => {
+  it('sets HttpOnly SameSite cookies only after the code, and never returns tokens in the body', async () => {
     const p = await makePerson();
-    const res = await client().post('/api/auth/login').send({ email: p.email, password: PASSWORD });
+    const agent = client();
+    const step = await agent.post('/api/auth/login').send({ email: p.email, password: PASSWORD });
+    expect(step.status).toBe(200);
+    expect(step.headers['set-cookie']).toBeUndefined();
+    expect((await agent.get('/api/auth/me')).status).toBe(401);
+
+    const res = await completeLogin(client(), p.email);
     expect(res.status).toBe(200);
     const access = cookieValue(res, 'lh_access')!;
     expect(access.raw).toMatch(/HttpOnly/);
@@ -42,19 +48,128 @@ describe('login', () => {
     expect(wrong.body.error.message).toBe(unknown.body.error.message);
   });
 
-  it('locks the account after repeated failures, even for the right password', async () => {
+  it('locks the account for 15 minutes on the third wrong password, even for the right one, and says when it unlocks', async () => {
     const p = await makePerson();
-    for (let i = 0; i < 5; i++) await client().post('/api/auth/login').send({ email: p.email, password: 'wrong-password' });
-    expect((await User.findById(p.userId).lean())!.lockUntil).toBeTruthy();
-    const res = await client().post('/api/auth/login').send({ email: p.email, password: PASSWORD });
-    expect(res.status).toBe(401);
+    const wrong = () => client().post('/api/auth/login').send({ email: p.email, password: 'wrong-password' });
+    expect((await wrong()).status).toBe(401);
+    expect((await wrong()).status).toBe(401);
+    const third = await wrong();
+    expect(third.status).toBe(423);
+    expect(third.body.error.code).toBe('ACCOUNT_LOCKED');
+    const unlockAt = new Date(third.body.error.meta.lockedUntil).getTime();
+    expect(unlockAt - Date.now()).toBeGreaterThan(14 * 60_000);
+    expect(unlockAt - Date.now()).toBeLessThanOrEqual(15 * 60_000);
+    expect(third.body.error.meta.retryAfterSeconds).toBeGreaterThan(14 * 60);
+
+    const right = await client().post('/api/auth/login').send({ email: p.email, password: PASSWORD });
+    expect(right.status).toBe(423);
+    // Trying again while locked does not push the unlock time back.
+    expect(new Date(right.body.error.meta.lockedUntil).getTime()).toBe(unlockAt);
     expect(await AuditLog.exists({ action: 'ACCOUNT_LOCKED' })).toBeTruthy();
+  });
+
+  it('unlocks by itself once the lock time has passed', async () => {
+    const p = await makePerson();
+    await User.updateOne({ _id: p.userId }, { lockUntil: new Date(Date.now() - 1000) });
+    expect((await completeLogin(client(), p.email)).status).toBe(200);
   });
 
   it('refuses an inactive account', async () => {
     const p = await makePerson();
     await User.updateOne({ _id: p.userId }, { isActive: false });
     expect((await client().post('/api/auth/login').send({ email: p.email, password: PASSWORD })).status).toBe(401);
+  });
+});
+
+describe('one-time sign-in code', () => {
+  const start = async (email: string) => {
+    const agent = client();
+    const step = await agent.post('/api/auth/login').send({ email, password: PASSWORD });
+    expect(step.status).toBe(200);
+    return { agent, token: step.body.data.challengeToken as string, destination: step.body.data.destination as string };
+  };
+
+  it('sends the code to the account email only, and offers no mobile option', async () => {
+    const p = await makePerson();
+    await Employee.updateOne({ _id: p.employee._id }, { phone: '98765 43210' });
+    const { agent, token, destination } = await start(p.email);
+    expect(destination).toMatch(/^pe\*+@test\.local$/);
+    const sent = await sendCode(agent, token);
+    expect(sent.res.status).toBe(200);
+    expect(sent.res.body.data.destination).toBe(destination);
+    expect(JSON.stringify(sent.res.body)).not.toMatch(/SMS|3210/);
+    const sms = await agent.post('/api/auth/otp/send').send({ challengeToken: token, channel: 'SMS' });
+    expect(sms.status).toBe(400);
+  });
+
+  it('makes resending wait 30 seconds, and a new code replaces the old one', async () => {
+    const p = await makePerson();
+    const { agent, token } = await start(p.email);
+    const first = await sendCode(agent, token);
+    expect(first.res.status).toBe(200);
+    const resendAt = new Date(first.res.body.data.resendAt).getTime();
+    expect(resendAt - Date.now()).toBeGreaterThan(28_000);
+    expect(resendAt - Date.now()).toBeLessThanOrEqual(30_000);
+
+    const tooSoon = await sendCode(agent, token);
+    expect(tooSoon.res.status).toBe(429);
+    expect(tooSoon.res.body.error.code).toBe('OTP_RESEND_WAIT');
+    expect(tooSoon.res.body.error.meta.resendAt).toBeTruthy();
+
+    await LoginChallenge.updateOne({}, { lastSentAt: new Date(Date.now() - 31_000) });
+    const second = await sendCode(agent, token);
+    expect(second.res.status).toBe(200);
+    if (first.code !== second.code) {
+      expect((await agent.post('/api/auth/otp/verify').send({ challengeToken: token, code: first.code })).body.error.code).toBe('INVALID_OTP');
+    }
+    expect((await agent.post('/api/auth/otp/verify').send({ challengeToken: token, code: second.code })).status).toBe(200);
+  });
+
+  it('allows five wrong codes, then makes the person enter their password again', async () => {
+    const p = await makePerson();
+    const { agent, token } = await start(p.email);
+    const { code } = await sendCode(agent, token);
+    const wrongCode = code === '000000' ? '111111' : '000000';
+    for (let left = 4; left >= 1; left--) {
+      const res = await agent.post('/api/auth/otp/verify').send({ challengeToken: token, code: wrongCode });
+      expect(res.status).toBe(401);
+      expect(res.body.error.meta.attemptsLeft).toBe(left);
+    }
+    const last = await agent.post('/api/auth/otp/verify').send({ challengeToken: token, code: wrongCode });
+    expect(last.body.error.code).toBe('LOGIN_CHALLENGE_EXPIRED');
+    expect((await agent.post('/api/auth/otp/verify').send({ challengeToken: token, code })).body.error.code).toBe('LOGIN_CHALLENGE_EXPIRED');
+  });
+
+  it('works once, refuses an expired code and needs a code to have been sent', async () => {
+    const p = await makePerson();
+    const { agent, token } = await start(p.email);
+    expect((await agent.post('/api/auth/otp/verify').send({ challengeToken: token, code: '123456' })).body.error.code).toBe('OTP_NOT_SENT');
+    const { code } = await sendCode(agent, token);
+    await LoginChallenge.updateOne({}, { codeExpiresAt: new Date(Date.now() - 1000) });
+    expect((await agent.post('/api/auth/otp/verify').send({ challengeToken: token, code })).body.error.code).toBe('OTP_CODE_EXPIRED');
+    await LoginChallenge.updateOne({}, { codeExpiresAt: new Date(Date.now() + 60_000) });
+    expect((await agent.post('/api/auth/otp/verify').send({ challengeToken: token, code })).status).toBe(200);
+    expect((await client().post('/api/auth/otp/verify').send({ challengeToken: token, code })).body.error.code).toBe('LOGIN_CHALLENGE_EXPIRED');
+  });
+
+  it('stores only a keyed hash of the code and of the challenge token', async () => {
+    const p = await makePerson();
+    const { agent, token } = await start(p.email);
+    const { code } = await sendCode(agent, token);
+    const stored = JSON.stringify(await LoginChallenge.findOne({}).lean());
+    expect(stored).not.toContain(token);
+    expect(stored).not.toContain(`"${code}"`);
+  });
+
+  it("one person's challenge cannot sign in anyone else", async () => {
+    const a = await makePerson();
+    const b = await makePerson();
+    const { agent, token } = await start(a.email);
+    const { code } = await sendCode(agent, token);
+    const res = await client().post('/api/auth/otp/verify').send({ challengeToken: token, code });
+    expect(res.status).toBe(200);
+    expect(res.body.data.email).toBe(a.email);
+    expect(res.body.data.email).not.toBe(b.email);
   });
 });
 
@@ -66,7 +181,7 @@ describe('sessions', () => {
   it('rotates the refresh token and revokes the session when an old one is replayed', async () => {
     const p = await makePerson();
     const agent = client();
-    const login = await agent.post('/api/auth/login').send({ email: p.email, password: PASSWORD });
+    const login = await completeLogin(agent, p.email);
     const first = cookieValue(login, REFRESH_COOKIE)!.value;
 
     const refreshed = await agent.post('/api/auth/refresh');
@@ -84,7 +199,7 @@ describe('sessions', () => {
   it('does not treat a parallel tab refreshing at once as theft', async () => {
     const p = await makePerson();
     const agent = client();
-    const login = await agent.post('/api/auth/login').send({ email: p.email, password: PASSWORD });
+    const login = await completeLogin(agent, p.email);
     const first = cookieValue(login, REFRESH_COOKIE)!.value;
     await agent.post('/api/auth/refresh');
     const race = await supertest(app).post('/api/auth/refresh').set('X-Requested-With', 'WorkNest').set('Cookie', `${REFRESH_COOKIE}=${first}`);
@@ -190,8 +305,11 @@ describe('API hardening', () => {
     const p = await makePerson();
     const limited = createApp({ rateLimits: { auth: 3 } });
     const send = (password: string) => supertest(limited).post('/api/auth/login').set('X-Requested-With', 'WorkNest').send({ email: p.email, password });
+    const other = await makePerson();
     for (let i = 0; i < 6; i++) expect((await send(PASSWORD)).status).toBe(200);
-    for (let i = 0; i < 3; i++) expect((await send('wrong-password')).status).toBe(401);
+    // Two failures stay under the account lock; the third comes from another account on the same address.
+    for (let i = 0; i < 2; i++) expect((await send('wrong-password')).status).toBe(401);
+    expect((await supertest(limited).post('/api/auth/login').set('X-Requested-With', 'WorkNest').send({ email: other.email, password: 'wrong-password' })).status).toBe(401);
     expect((await send(PASSWORD)).status).toBe(429);
   });
 

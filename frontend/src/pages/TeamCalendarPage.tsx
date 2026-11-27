@@ -7,11 +7,12 @@ import { Avatar } from '../components/Avatar';
 import { Icon } from '../components/icons';
 import type { CalendarHoliday } from '../components/LeaveCalendar';
 import { DateBadge } from '../components/planner/Planner';
-import { Card, cx, Note, Select, Spinner } from '../components/ui';
+import { Card, cx, Input, Note, Select, Spinner } from '../components/ui';
 import { useFetch } from '../hooks/useFetch';
+import type { Named } from '../types';
 import { addDaysTo, formatDate, formatRange, toDateOnly, todayString } from '../utils/date';
 
-export interface TeamAway { id: string; employeeId: string; employeeName: string; avatarFile?: string | null; startDate: string; endDate: string; halfDay: boolean }
+export interface TeamAway { id: string; employeeId: string; employeeName: string; avatarFile?: string | null; team?: string | null; startDate: string; endDate: string; halfDay: boolean }
 
 /* Module-level, so FullCalendar is not rebuilt on every render (a new options object makes it fire datesSet again). */
 const PLUGINS = [dayGridPlugin];
@@ -35,6 +36,9 @@ const workingDays = (start: string, end: string, half: boolean) => {
 const dayLabel = (n: number) => `${n} ${n === 1 ? 'day' : 'days'}`;
 
 type View = 'dayGridMonth' | 'dayGridWeek';
+type Scope = 'team' | 'company';
+const SCOPE_KEY = 'worknest:calendar-scope';
+const savedScope = (): Scope => (localStorage.getItem(SCOPE_KEY) === 'team' ? 'team' : 'company');
 
 export function TeamCalendarPage() {
   const ref = useRef<FullCalendar>(null);
@@ -42,10 +46,24 @@ export function TeamCalendarPage() {
   const [range, setRange] = useState<{ start: string; end: string; title: string; anchor: string } | null>(null);
   const [view, setView] = useState<View>('dayGridMonth');
   const [focus, setFocus] = useState<string | null>(null);
+  const [scope, setScopeState] = useState<Scope>(savedScope);
+  const [department, setDepartment] = useState('');
+  const [search, setSearch] = useState('');
+  const setScope = (next: Scope) => {
+    setScopeState(next);
+    setFocus(null);
+    localStorage.setItem(SCOPE_KEY, next);
+  };
+  const departments = useFetch<Named[]>(scope === 'company' ? '/departments' : null);
   // Always include the next two weeks, so "Coming up" works whichever month is on screen.
   const fetchRange = range ? { start: range.start < today ? range.start : today, end: range.end > addDaysTo(today, 14) ? range.end : addDaysTo(today, 14) } : null;
-  const { data, error, loading } = useFetch<{ events: TeamAway[]; holidays: CalendarHoliday[] }>(fetchRange ? '/calendar/team' : null, fetchRange ?? undefined);
-  const events = useMemo(() => data?.events ?? [], [data]);
+  const { data, error, loading } = useFetch<{ events: TeamAway[]; holidays: CalendarHoliday[] }>(
+    fetchRange ? '/calendar/team' : null,
+    fetchRange ? { ...fetchRange, scope, ...(scope === 'company' && department ? { department } : {}) } : undefined,
+  );
+  const needle = search.trim().toLowerCase();
+  const events = useMemo(() => (data?.events ?? []).filter((e) => !needle || e.employeeName.toLowerCase().includes(needle)), [data, needle]);
+  const whose = scope === 'company' ? (department ? 'this team' : 'the company') : 'your team';
   const holidays = useMemo(() => data?.holidays ?? [], [data]);
 
   const people = useMemo(() => {
@@ -121,14 +139,14 @@ export function TeamCalendarPage() {
 
   return (
     <>
-      <h1 className="sr-only">Team calendar</h1>
+      <h1 className="sr-only">Team and company calendar</h1>
       <Card flush>
         {/* Toolbar, matching My calendar */}
         <div className="flex flex-wrap items-center gap-3 border-b border-line px-4 py-3 sm:px-5">
           <DateBadge date={today} />
           <div className="min-w-0 flex-1">
             <div className="truncate text-[20px] font-semibold tracking-tight">{range?.title ?? ' '}</div>
-            <div className="text-[13px] text-muted">Who is away from your team. Leave types and reasons stay private.</div>
+            <div className="text-[13px] text-muted">Who is away from {whose}. Leave types and reasons stay private.</div>
           </div>
           {loading && <span className="text-brand"><Spinner small /></span>}
           <div className="flex flex-wrap items-center gap-2">
@@ -137,11 +155,27 @@ export function TeamCalendarPage() {
               <button type="button" onClick={() => api()?.today()} className="border-x border-line px-3 py-1.5 text-[13px] font-medium hover:bg-paper">Today</button>
               <button type="button" aria-label="Next" onClick={() => api()?.next()} className="rounded-r-lg p-2 text-muted hover:bg-paper hover:text-ink"><Icon name="chevronRight" size={16} /></button>
             </div>
+            <div role="group" aria-label="Show" className="flex items-center rounded-lg border border-line-strong bg-surface p-0.5">
+              {(['team', 'company'] as const).map((s) => (
+                <button key={s} type="button" aria-pressed={scope === s} onClick={() => setScope(s)} className={cx('rounded-md px-3 py-1 text-[13px] font-medium', scope === s ? 'bg-brand text-white' : 'text-muted hover:text-ink')}>
+                  {s === 'team' ? 'My team' : 'Whole company'}
+                </button>
+              ))}
+            </div>
             <Select aria-label="View" className="w-32" value={view} onChange={(e) => changeView(e.target.value as View)}>
               <option value="dayGridMonth">Month view</option>
               <option value="dayGridWeek">Week view</option>
             </Select>
           </div>
+        </div>
+        <div className="flex flex-wrap gap-2 border-b border-line px-4 py-2.5 sm:px-5">
+          {scope === 'company' && (
+            <Select aria-label="Team" className="w-48" value={department} onChange={(e) => { setDepartment(e.target.value); setFocus(null); }}>
+              <option value="">All teams</option>
+              {departments.data?.map((d) => <option key={d._id} value={d._id}>{d.name}</option>)}
+            </Select>
+          )}
+          <Input aria-label="Search people" type="search" className="w-56" placeholder="Search a name" value={search} onChange={(e) => setSearch(e.target.value)} />
         </div>
         {error && <div className="px-4 pt-3 sm:px-5"><Note>{error}</Note></div>}
 
@@ -153,7 +187,7 @@ export function TeamCalendarPage() {
                 Away today
                 <span className={cx('rounded-full px-2 py-0.5 text-[11.5px] font-semibold', awayToday.length ? 'bg-amber-soft text-amber' : 'bg-brand-soft text-brand-strong')}>{awayToday.length ? `${awayToday.length} away` : 'Everyone in'}</span>
               </h3>
-              {!awayToday.length && <p className="rounded-lg border border-dashed border-line px-3 py-4 text-center text-[12.5px] text-faint">Nobody on your team is away today.</p>}
+              {!awayToday.length && <p className="rounded-lg border border-dashed border-line px-3 py-4 text-center text-[12.5px] text-faint">Nobody from {whose} is away today.</p>}
               <ul className="space-y-1">
                 {awayToday.map((e) => (
                   <PersonRow key={e.id} leave={e} active={focus === e.employeeId} onClick={() => setFocus(focus === e.employeeId ? null : e.employeeId)} note={e.endDate === today ? (e.halfDay ? 'Half day today' : 'Back tomorrow') : `Back ${formatDate(addDaysTo(e.endDate, 1))}`} />
@@ -248,7 +282,7 @@ function PersonRow({ leave, note, active, onClick }: { leave: TeamAway; note: st
         </span>
         <span className="min-w-0">
           <span className="block truncate text-[13px] font-medium">{leave.employeeName}{leave.halfDay ? ' · ½ day' : ''}</span>
-          <span className="block truncate text-[11.5px] text-muted">{note}</span>
+          <span className="block truncate text-[11.5px] text-muted">{leave.team ? `${leave.team} · ` : ''}{note}</span>
         </span>
       </button>
     </li>

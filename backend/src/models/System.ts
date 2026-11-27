@@ -134,7 +134,7 @@ const settingsSchema = new Schema<ICompanySettings>(
       expiryWarningDays: { type: Number, default: 14, min: 0 },
     },
     security: {
-      maxFailedLogins: { type: Number, default: 5, min: 1 },
+      maxFailedLogins: { type: Number, default: 3, min: 1 },
       lockoutMinutes: { type: Number, default: 15, min: 1 },
       minPasswordLength: { type: Number, default: 10, min: 8 },
     },

@@ -75,6 +75,8 @@ export const defaultRateLimits: RateLimits = {
 export const createLimiters = (limits: RateLimits) => ({
   // Only failures count, so a whole office signing in from one IP address is not locked out.
   login: limiter(limits.auth, 'Too many failed sign-in attempts. Please try again later.', true),
+  // Codes are guarded per sign-in (five guesses, one send every 30 seconds); this catches one address trying many.
+  otp: limiter(limits.auth, 'Too many failed attempts. Please try again later.', true),
   auth: limiter(limits.auth, 'Too many attempts. Please try again later.'),
   sensitive: limiter(limits.sensitive, 'Too many requests. Please slow down.'),
   global: limiter(limits.global, 'Too many requests. Please slow down.'),
